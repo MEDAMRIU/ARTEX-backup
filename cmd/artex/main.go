@@ -52,11 +52,15 @@ func main() {
 
 func run() int {
 	var (
-		addr    = flag.String("addr", ":8787", "HTTP listen address")
+		addr    = flag.String("addr", "127.0.0.1:8787", "HTTP listen address")
 		dataDir = flag.String("data", filepath.Join(config.BaseDir(), "data"), "data directory for SQLite stores (default: data/ next to the executable)")
 		proxy   = flag.String("proxy", "127.0.0.1:8788", "traffic recording proxy address (empty to disable)")
 	)
 	flag.Parse()
+	// Use the bundled/system ripgrep. Avoid a surprise global npm install.
+	if os.Getenv("NORMA_RIPGREP_NO_INSTALL") == "" {
+		_ = os.Setenv("NORMA_RIPGREP_NO_INSTALL", "1")
+	}
 
 	// hand the build version to the server package so GET /api/health can report it
 	// to the frontend top bar.
@@ -112,7 +116,14 @@ func run() int {
 		skillDir = abs
 	}
 	log.Printf("[config] skill 目录: %s", skillDir)
-	srv := server.New(ctx, mgr, skillDir, *dataDir, config.BaseDir())
+	keyDir := config.BaseDir()
+	if configured := os.Getenv("ARTEX_AUTH_DIR"); configured != "" {
+		keyDir = configured
+		if err := os.MkdirAll(keyDir, 0o700); err != nil {
+			log.Fatalf("create auth directory: %v", err)
+		}
+	}
+	srv := server.New(ctx, mgr, skillDir, *dataDir, keyDir)
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv.Handler(),

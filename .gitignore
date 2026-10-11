@@ -58,3 +58,9 @@ Thumbs.db
 /bench/
 /Dockerfile.bench
 /Dockerfile.bench.v2
+# Dependency directories for optional runtime and recon tooling
+runtime-tools/node_modules/
+skills/api-recon/scripts/node_modules/
+
+# Local browser verification artifacts
+/output/

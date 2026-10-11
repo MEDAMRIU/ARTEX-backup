@@ -1148,6 +1148,11 @@ func (s *Server) fsUpdateSkillMeta(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid skill name")
 		return
 	}
+	root := s.openSkillRoot(w, name)
+	if root == nil {
+		return
+	}
+	defer root.Close()
 	var body struct {
 		MCPs          *[]string `json:"mcps"`
 		Description   *string   `json:"description"`
@@ -1158,8 +1163,8 @@ func (s *Server) fsUpdateSkillMeta(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	skillMD := filepath.Join(s.skillDir, name, "SKILL.md")
-	raw, err := os.ReadFile(skillMD)
+	skillMD := "SKILL.md"
+	raw, err := root.ReadFile(skillMD)
 	if err != nil {
 		writeErr(w, 404, "skill not found")
 		return
@@ -1169,7 +1174,7 @@ func (s *Server) fsUpdateSkillMeta(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	if err := os.WriteFile(skillMD, updated, 0o644); err != nil {
+	if err := root.WriteFile(skillMD, updated, 0o644); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
@@ -1376,6 +1381,10 @@ func (s *Server) fsUploadSkill(w http.ResponseWriter, r *http.Request) {
 	entries := 0
 	for _, e := range entriesAll {
 		f := e.f
+		if !f.Mode().IsRegular() {
+			writeErr(w, 400, "压缩包包含非普通文件")
+			return
+		}
 		// only files under the skill root; skip anything outside it.
 		if prefix != "" && !strings.HasPrefix(e.name, prefix) {
 			continue
@@ -1418,6 +1427,10 @@ func (s *Server) fsUploadSkill(w http.ResponseWriter, r *http.Request) {
 		rc.Close()
 		if err != nil {
 			writeErr(w, 500, err.Error())
+			return
+		}
+		if n > maxSkillFileBytes {
+			writeErr(w, 400, "文件过大："+rel)
 			return
 		}
 		total += n
@@ -1592,12 +1605,17 @@ func (s *Server) fsReadFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid skill name")
 		return
 	}
+	root := s.openSkillRoot(w, name)
+	if root == nil {
+		return
+	}
+	defer root.Close()
 	file, errMsg := skillRelPath(r.PathValue("file"))
 	if errMsg != "" {
 		writeErr(w, 400, errMsg)
 		return
 	}
-	data, err := os.ReadFile(filepath.Join(s.skillDir, name, file))
+	data, err := root.ReadFile(file)
 	if os.IsNotExist(err) {
 		writeErr(w, 404, "file not found")
 		return
@@ -1620,6 +1638,11 @@ func (s *Server) fsWriteFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errMsg)
 		return
 	}
+	root := s.openSkillRoot(w, name)
+	if root == nil {
+		return
+	}
+	defer root.Close()
 	var body struct {
 		Content string `json:"content"`
 	}
@@ -1627,18 +1650,18 @@ func (s *Server) fsWriteFile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	skillPath := filepath.Join(s.skillDir, name)
-	if _, err := os.Stat(skillPath); os.IsNotExist(err) {
+	skillPath := "."
+	if _, err := root.Stat(skillPath); os.IsNotExist(err) {
 		writeErr(w, 404, "skill not found")
 		return
 	}
 	fullPath := filepath.Join(skillPath, file)
 	// create parent subdirectory if needed (e.g. scripts/, references/, assets/)
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+	if err := root.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	if err := os.WriteFile(fullPath, []byte(body.Content), 0o644); err != nil {
+	if err := root.WriteFile(fullPath, []byte(body.Content), 0o644); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
@@ -1651,6 +1674,11 @@ func (s *Server) fsCreateDir(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid skill name")
 		return
 	}
+	root := s.openSkillRoot(w, name)
+	if root == nil {
+		return
+	}
+	defer root.Close()
 	var body struct {
 		Path string `json:"path"`
 	}
@@ -1663,12 +1691,12 @@ func (s *Server) fsCreateDir(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, errMsg)
 		return
 	}
-	skillPath := filepath.Join(s.skillDir, name)
-	if _, err := os.Stat(skillPath); os.IsNotExist(err) {
+	skillPath := "."
+	if _, err := root.Stat(skillPath); os.IsNotExist(err) {
 		writeErr(w, 404, "skill not found")
 		return
 	}
-	if err := os.MkdirAll(filepath.Join(skillPath, dir), 0o755); err != nil {
+	if err := root.MkdirAll(filepath.Join(skillPath, dir), 0o755); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}
@@ -1681,17 +1709,22 @@ func (s *Server) fsDeletePath(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "invalid skill name")
 		return
 	}
+	root := s.openSkillRoot(w, name)
+	if root == nil {
+		return
+	}
+	defer root.Close()
 	file, errMsg := skillRelPath(r.PathValue("file"))
 	if errMsg != "" {
 		writeErr(w, 400, errMsg)
 		return
 	}
-	fullPath := filepath.Join(s.skillDir, name, file)
-	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+	fullPath := file
+	if _, err := root.Stat(fullPath); os.IsNotExist(err) {
 		writeErr(w, 404, "not found")
 		return
 	}
-	if err := os.RemoveAll(fullPath); err != nil {
+	if err := root.RemoveAll(fullPath); err != nil {
 		writeErr(w, 500, err.Error())
 		return
 	}

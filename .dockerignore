@@ -14,3 +14,10 @@ bench/.env
 bench/scheduler.py
 bench/entrypoint_v2.sh
 bench/seed_v2.sh
+# Never send runtime credentials or local reports to the image builder.
+.env
+.env.*
+config.json
+jwt.key
+.auth/
+output/

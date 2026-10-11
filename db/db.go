@@ -117,7 +117,7 @@ func ensureDatabase(dsn string) error {
 	var exists bool
 	_ = admin.QueryRow(`SELECT true FROM pg_database WHERE datname=$1`, dbName).Scan(&exists)
 	if !exists {
-		if _, err := admin.Exec(`CREATE DATABASE "` + dbName + `"`); err != nil {
+		if _, err := admin.Exec(`CREATE DATABASE "` + strings.ReplaceAll(dbName, `"`, `""`) + `"`); err != nil {
 			return fmt.Errorf("create database %q: %w", dbName, err)
 		}
 	}

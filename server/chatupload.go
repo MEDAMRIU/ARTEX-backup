@@ -2,7 +2,9 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -74,8 +76,13 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		defer s.engine.decInflight(id)
 	}
-	dir := filepath.Join(s.m.dir, sub, id, "uploads")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	root := s.wsRoot(w)
+	if root == nil {
+		return
+	}
+	defer root.Close()
+	dir := filepath.Join(sub, id, "uploads")
+	if err := root.MkdirAll(dir, 0o755); err != nil {
 		writeErr(w, 500, "建目录失败: "+err.Error())
 		return
 	}
@@ -84,6 +91,7 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "解析上传失败或超出大小限制: "+err.Error())
 		return
 	}
+	defer r.MultipartForm.RemoveAll()
 	files := r.MultipartForm.File["file"]
 	if len(files) == 0 {
 		writeErr(w, 400, "缺少上传文件(表单字段 file)")
@@ -95,31 +103,34 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
 			continue
 		}
-		dest := uniqueUploadPath(dir, name)
-		if err := saveUpload(hdr, dest); err != nil {
+		dest, err := saveUniqueUpload(root, hdr, dir, name)
+		if err != nil {
 			writeErr(w, 500, "保存失败: "+err.Error())
 			return
 		}
+
 		base := filepath.Base(dest)
-		out = append(out, chatAttachment{Name: base, Path: "uploads/" + base, Size: hdr.Size, Abs: dest})
+		out = append(out, chatAttachment{Name: base, Path: "uploads/" + base, Size: hdr.Size, Abs: filepath.Join(s.m.dir, dest)})
 	}
 	writeJSON(w, 200, map[string]any{"attachments": out})
 }
 
-// uniqueUploadPath returns dir/name, or dir/name-1, dir/name-2… when it already exists,
-// so re-uploading the same filename never clobbers a prior attachment.
-func uniqueUploadPath(dir, name string) string {
-	dest := filepath.Join(dir, name)
-	if _, err := os.Stat(dest); os.IsNotExist(err) {
-		return dest
-	}
+// Exclusive creation prevents concurrent uploads and symlink races from
+// overwriting another attachment. Every attempt stays inside the workspace.
+func saveUniqueUpload(root *os.Root, hdr *multipart.FileHeader, dir, name string) (string, error) {
 	ext := filepath.Ext(name)
 	stem := strings.TrimSuffix(name, ext)
-	for i := 1; ; i++ {
-		cand := filepath.Join(dir, fmt.Sprintf("%s-%d%s", stem, i, ext))
-		if _, err := os.Stat(cand); os.IsNotExist(err) {
-			return cand
+	for i := 0; ; i++ {
+		candidate := name
+		if i > 0 {
+			candidate = fmt.Sprintf("%s-%d%s", stem, i, ext)
 		}
+		dest := filepath.Join(dir, candidate)
+		err := saveUpload(root, hdr, dest, true)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		return dest, err
 	}
 }
 
