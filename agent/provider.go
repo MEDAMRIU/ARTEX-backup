@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Autumn-27/artex/chatgpt"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/compaction"
@@ -30,10 +31,12 @@ import (
 
 // Config describes the LLM backend resolved from the environment.
 type Config struct {
-	Format  llm.Format
-	BaseURL string
-	APIKey  string
-	Model   string
+	ChatGPT          *chatgpt.Manager
+	ChatGPTAccountID string
+	Format           llm.Format
+	BaseURL          string
+	APIKey           string
+	Model            string
 	// Proxy routes all LLM requests through the given proxy URL (http/https/socks5,
 	// optionally with user:pass@ credentials). Empty means direct — it does NOT
 	// fall back to the standard *_PROXY environment variables.
@@ -258,6 +261,13 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.ChatGPTAccountID != "" {
+		if c.ChatGPT == nil || c.Format != llm.FormatOpenAIResponses || c.BaseURL != chatgpt.Resource {
+			return nil, fmt.Errorf("invalid ChatGPT provider configuration")
+		}
+		client.Transport = c.ChatGPT.Transport(c.ChatGPTAccountID, client.Transport)
+		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	}
 	lc := llm.Config{
 		Format:     c.Format,
 		BaseURL:    c.BaseURL,
@@ -279,6 +289,15 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	lc.EmptyResponseInterval = c.Retry.EmptyInterval
 	if c.RatePerSecond > 0 || c.RatePerMinute > 0 {
 		lc.RateLimit = &llm.RateLimit{PerSecond: c.RatePerSecond, PerMinute: c.RatePerMinute}
+	}
+	if c.ChatGPTAccountID != "" {
+		lc.APIKey = "chatgpt-managed" // not a credential; transport resolves the current token
+		lc.MaxRetries = -1            // quota/permission failures must not trigger paid fallback or retry storms
+		p, err := llm.NewProvider(lc)
+		if err != nil {
+			return nil, err
+		}
+		return chatgpt.Streaming(p), nil
 	}
 	return llm.NewProvider(lc)
 }

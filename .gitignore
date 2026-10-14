@@ -64,3 +64,6 @@ skills/api-recon/scripts/node_modules/
 
 # Local browser verification artifacts
 /output/
+
+# Encrypted ChatGPT OAuth state (kept under the private auth directory)
+/chatgpt-auth/

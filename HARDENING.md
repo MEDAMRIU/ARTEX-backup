@@ -108,3 +108,66 @@ The isolated authentication test creates and drops its own randomly named databa
 4. **Distribution/license review.** The v0.3.12 tag lacks a root LICENSE; a later upstream tag adds one. This branch does not decide the licensing of an English distribution. The vendored stylesheet's own license is included.
 
 This is a tested hardening baseline for continuing development, not a guarantee that no undiscovered vulnerability exists. English translation should preserve protocol keys, schemas, enums and agent semantics and use these regression tests as its baseline.
+
+## ChatGPT connection — 14 October 2026
+
+Implemented on `feat/chatgpt-sign-in` from hardening baseline `1fa2cc4`.
+The checkout was moved by the owner's cleanup to
+`/Users/amriu/Developer/_attic/2026-10-14-cleanup/ARTEX-backup`; this work does
+not restore or deploy that archive.
+
+Model settings now support the official Sign in with ChatGPT public flow:
+loopback authorization-code callback, PKCE, state, nonce, signed ID-token
+validation, multiple account registrations, reconnect and sign-out. Native
+ARTEX and the browser must run on the same computer. Remote and ordinary
+container installations need callback forwarding and are not supported by this
+initial loopback implementation.
+
+Credentials live in `chatgpt-auth/credentials.enc` beneath the authentication
+key directory (`ARTEX_AUTH_DIR` when set). AES-GCM encryption derives from the
+existing JWT key; preserve that key with the encrypted credentials when moving
+an installation. Directory permissions are 0700 and credential files 0600.
+OS file locks serialize refresh across processes; each operation reloads disk
+under the lock. Rotated material survives a temporary signing-key outage but
+cannot be used until the new identity validates. Sign-out invalidates returning
+sign-in attempts across processes and attempts remote token revocation.
+Profiles and browser APIs expose account references, never bearer credentials.
+
+The existing Norma Responses provider remains the inference adapter. The
+ChatGPT transport fixes the destination to OpenAI, attaches managed tokens,
+uses streaming with `store:false`, removes unsupported preview parameters,
+groups function tools in a namespace, and preserves full tool history. Model
+choices come from the selected account's catalog. A ChatGPT error cannot switch
+to an API-key profile or replay the whole worker intent; incomplete streams are
+reported as failures. This does not expand account model eligibility or limits.
+
+Validation after review fixes:
+
+- `go test -race -p 1 -count=1 ./...` passed against a fresh disposable PostgreSQL
+  database. A prior parallel run against a reused database failed two existing
+  company-attribution fixture tests; the documented fresh/serial run passed.
+- Focused OAuth tests cover PKCE/state/nonce, identity mismatch, encrypted
+  persistence, rotating refresh tokens, concurrent managers, transient JWKS
+  failure recovery, sign-out races, scopes, catalog filtering and SSE failures.
+- Database round-trip and authenticated server endpoint tests passed.
+- `go vet ./...`, `git diff --check` and the Next.js static build passed.
+- Separate read-only verification repeated the focused race tests and database
+  round-trip and found no remaining blocker in the reported paths.
+- Native embedded UI built and ran at `http://127.0.0.1:18787`. Browser setup,
+  model settings and Continue with ChatGPT worked; the new tab reached OpenAI's
+  verification page. Live consent, actual account eligibility and real inference
+  remain unverified. No external model requests or paid operations were made.
+
+Manual acceptance: open `/system/llm/`, create a profile with **新建**, click
+**Continue with ChatGPT**, complete OpenAI sign-in/consent, and return to ARTEX.
+Expect the account and **Using ChatGPT plan**. Load models with the button beside
+**模型**, choose one, name and save the profile, then activate it with **设为激活**.
+The connection test (**测试连接**) makes a real request using the plan allowance.
+Sign out should retain the registration while making its credentials unusable.
+Final acceptance remains pending the owner's live check.
+
+Protocol references:
+- https://developers.openai.com/siwc/token-sharing-open-source/sign-in
+- https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions
+- https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference
+- https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations

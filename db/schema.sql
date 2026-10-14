@@ -1220,3 +1220,6 @@ CREATE INDEX IF NOT EXISTS idx_side_requests_history ON side_question_requests(s
 -- Additive v3 archive fields; old archives restore these as empty objects.
 ALTER TABLE side_question_sessions ADD COLUMN IF NOT EXISTS memory JSONB NOT NULL DEFAULT '{}';
 ALTER TABLE side_question_requests ADD COLUMN IF NOT EXISTS context_info JSONB NOT NULL DEFAULT '{}';
+
+-- ChatGPT OAuth credentials stay in protected local storage, never in this table.
+ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS chatgpt_account_id TEXT NOT NULL DEFAULT '';

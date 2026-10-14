@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/chatgpt"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/llm"
@@ -82,6 +83,10 @@ func isTaskLLMChainExhausted(err error) bool {
 // network failure, or 5xx does not rotate providers; the response must explicitly
 // identify quota, credits, billing balance, or payment exhaustion.
 func isQuotaExhaustedError(err error) bool {
+	var planErr *chatgpt.PlanError
+	if errors.As(err, &planErr) {
+		return false
+	}
 	return err != nil && agent.IsQuotaExhaustedMessage(err.Error())
 }
 
@@ -432,7 +437,7 @@ func isRetryableStreamError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if isQuotaExhaustedError(err) {
+	if chatgpt.IsPlanError(err) || isQuotaExhaustedError(err) {
 		return false
 	}
 	s := strings.ToLower(err.Error())

@@ -1842,6 +1842,10 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	p := body.LLMProfile
 	p.APIKey = body.APIKey
 	p.Streaming = body.Streaming == nil || *body.Streaming
+	if err := s.validateChatGPTProfile(r.Context(), &p); err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
 	// 输出上限:负数无意义,归零(= 不发送该字段)。字段名开关只有 Chat Completions
 	// 用得上——anthropic 与 openai-responses 各自定死了字段名,存下来只会误导后续读者,
 	// 故非 openai 格式一律清空。未知取值同样清空,避免把 DB CHECK 的报错甩给用户。
@@ -2011,14 +2015,24 @@ func (s *Server) pgLLMPoolReset(w http.ResponseWriter, r *http.Request) {
 // the OpenAI path, it falls back to the OpenAI endpoint at the stripped root.
 func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider  string `json:"provider"` // "openai" | "anthropic"
-		BaseURL   string `json:"base_url"`
-		APIKey    string `json:"api_key"`
-		Proxy     string `json:"proxy"`
-		ProfileID *int64 `json:"profile_id"` // fallback: use stored key from this profile
+		ChatGPTAccountID *string `json:"chatgpt_account_id"`
+		Provider         string  `json:"provider"` // "openai" | "anthropic"
+		BaseURL          string  `json:"base_url"`
+		APIKey           string  `json:"api_key"`
+		Proxy            string  `json:"proxy"`
+		ProfileID        *int64  `json:"profile_id"` // fallback: use stored key from this profile
 	}
 	if err := decode(r, &req); err != nil {
 		writeErr(w, 400, err.Error())
+		return
+	}
+	if req.ChatGPTAccountID == nil && req.ProfileID != nil {
+		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
+			req.ChatGPTAccountID = &p.ChatGPTAccountID
+		}
+	}
+	if req.ChatGPTAccountID != nil && *req.ChatGPTAccountID != "" {
+		s.chatGPTModelsFor(w, r, *req.ChatGPTAccountID)
 		return
 	}
 	// Resolve API key: form input > profile stored key.

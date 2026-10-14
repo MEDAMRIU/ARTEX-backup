@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/chatgpt"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/llmpool"
@@ -38,9 +39,10 @@ var BuildVersion = "dev"
 // Server exposes the ARTEX backend over a JSON HTTP API for the shadcn/ui
 // frontend.
 type Server struct {
-	m      *Manager
-	engine *Engine
-	ctx    context.Context
+	chatGPT *chatgpt.Manager
+	m       *Manager
+	engine  *Engine
+	ctx     context.Context
 
 	skillDir string // root directory for skill subdirectories
 	jwtKey   []byte // HS256 signing key loaded from / generated into dataDir/jwt.key
@@ -150,6 +152,13 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		profChatAgents: map[int64]*agent.ChatAgent{},
 		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
 		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+	s.chatGPT, err = chatgpt.New(filepath.Join(keyDir, "chatgpt-auth"), key)
+	if err != nil {
+		log.Fatalf("[chatgpt] credential store: %v", err)
+	}
+	if ctx.Done() != nil {
+		go func() { <-ctx.Done(); s.chatGPT.Close() }()
+	}
 	s.initSideQuestions()
 	// 熔断阈值/冷却是失败路径上的热参数，启动时把全局重试策略推给 Registry 一次；
 	// 之后每次保存策略再推一次（saveLLMRetryPolicy）。
@@ -329,8 +338,9 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 	cfg.Stream = p.Streaming
 	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
 	cfg.SessionHeaderKey = p.SessionHeaderKey
+	s.configureChatGPT(&cfg, p.ChatGPTAccountID)
 	s.applyProfileRetry(&cfg, p)
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && cfg.ChatGPTAccountID == "" {
 		return cfg, false
 	}
 	s.cfgMu.Lock()
@@ -367,7 +377,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 		}
 	}
 	newID, err := s.m.pg.SaveProfile(&db.LLMProfile{
-		ID: id, Name: "default", Format: format, Model: cfg.Model, BaseURL: cfg.BaseURL, Proxy: cfg.Proxy,
+		ID: id, Name: "default", ChatGPTAccountID: cfg.ChatGPTAccountID, Format: format, Model: cfg.Model, BaseURL: cfg.BaseURL, Proxy: cfg.Proxy,
 		APIKey: cfg.APIKey, RatePerSecond: cfg.RatePerSecond, RatePerMinute: cfg.RatePerMinute,
 		ContextWindowK: cfg.ContextWindowK, ThinkingType: cfg.ThinkingType, ReasoningEffort: cfg.ReasoningEffort, IsDefault: true,
 		Priority: priority, PoolExclude: poolExclude, Streaming: streaming,
@@ -500,8 +510,9 @@ func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 	cfg.Stream = p.Streaming
 	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
 	cfg.SessionHeaderKey = p.SessionHeaderKey
+	s.configureChatGPT(&cfg, p.ChatGPTAccountID)
 	s.applyProfileRetry(&cfg, p)
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && cfg.ChatGPTAccountID == "" {
 		return cfg, false
 	}
 	return cfg, true
@@ -727,6 +738,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/llm", s.getLLM)
 	mux.HandleFunc("POST /api/llm", s.setLLM)
 	mux.HandleFunc("POST /api/llm/test", s.testLLM)
+	s.chatGPTRoutes(mux)
 
 	// asset system
 	mux.HandleFunc("GET /api/assets", s.listAssets)
@@ -1258,7 +1270,7 @@ func (s *Server) getLLM(w http.ResponseWriter, r *http.Request) {
 		"model":            s.llmCfg.Model,
 		"base_url":         s.llmCfg.BaseURL,
 		"proxy":            s.llmCfg.Proxy,
-		"key_set":          s.llmCfg.APIKey != "",
+		"key_set":          s.llmCfg.APIKey != "" || s.llmCfg.ChatGPTAccountID != "",
 		"rate_per_second":  s.llmCfg.RatePerSecond,
 		"rate_per_minute":  s.llmCfg.RatePerMinute,
 		"context_window_k": s.llmCfg.ContextWindowK,
@@ -1329,16 +1341,17 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 // testLLM makes a real minimal completion to verify the config works.
 func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider         string `json:"provider"`
-		Model            string `json:"model"`
-		BaseURL          string `json:"base_url"`
-		Proxy            string `json:"proxy"`
-		APIKey           string `json:"api_key"`
-		ThinkingType     string `json:"thinking_type"`
-		ReasoningEffort  string `json:"reasoning_effort"`
-		ProfileID        *int64 `json:"profile_id"`         // 测已存 profile 时传入：api_key 为空则用它存的 key
-		Streaming        *bool  `json:"streaming"`          // 省略=流式，与保存 profile 时同一套默认
-		SessionHeaderKey string `json:"session_header_key"` // 非空=测试时也带该自定义会话头，值为一次性随机 session id
+		ChatGPTAccountID *string `json:"chatgpt_account_id"`
+		Provider         string  `json:"provider"`
+		Model            string  `json:"model"`
+		BaseURL          string  `json:"base_url"`
+		Proxy            string  `json:"proxy"`
+		APIKey           string  `json:"api_key"`
+		ThinkingType     string  `json:"thinking_type"`
+		ReasoningEffort  string  `json:"reasoning_effort"`
+		ProfileID        *int64  `json:"profile_id"`         // 测已存 profile 时传入：api_key 为空则用它存的 key
+		Streaming        *bool   `json:"streaming"`          // 省略=流式，与保存 profile 时同一套默认
+		SessionHeaderKey string  `json:"session_header_key"` // 非空=测试时也带该自定义会话头，值为一次性随机 session id
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, 400, err.Error())
@@ -1358,12 +1371,18 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// 见 TestConnection)。opencode zen 等强制要求 x-opencode-session 的端点，缺了它
 	// 直接 400，必须在测试路径上也带上，否则"对话通、测试 400"。
 	cfg.SessionHeaderKey = req.SessionHeaderKey
+	if req.ChatGPTAccountID != nil {
+		s.configureChatGPT(&cfg, *req.ChatGPTAccountID)
+	}
 	// API Key 解析优先级：表单输入 > 指定 profile 存的 key > 全局配置的 key。
 	// 已存 profile 的 key 不回传浏览器，所以测试已存配置时表单为空，需从 DB 取。
 	// 会话头名同理：表单未带时用已存 profile 的值兜底。
 	if req.ProfileID != nil && (cfg.APIKey == "" || cfg.SessionHeaderKey == "") {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
-			if cfg.APIKey == "" {
+			if req.ChatGPTAccountID == nil {
+				s.configureChatGPT(&cfg, p.ChatGPTAccountID)
+			}
+			if cfg.APIKey == "" && cfg.ChatGPTAccountID == "" {
 				cfg.APIKey = p.APIKey
 			}
 			if cfg.SessionHeaderKey == "" {
@@ -1371,12 +1390,12 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && cfg.ChatGPTAccountID == "" {
 		s.cfgMu.Lock()
 		cfg.APIKey = s.llmCfg.APIKey
 		s.cfgMu.Unlock()
 	}
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && cfg.ChatGPTAccountID == "" {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": "未提供 API Key"})
 		return
 	}

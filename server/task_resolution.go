@@ -29,7 +29,7 @@ func (s *Server) resolutionFromProfile(p *db.LLMProfile, source string) taskLLMR
 		Model:     p.Model,
 		Source:    source,
 	}
-	if p.APIKey == "" {
+	if p.APIKey == "" && p.ChatGPTAccountID == "" {
 		result.Reason = "LLM 配置未设置 API Key"
 		return result
 	}

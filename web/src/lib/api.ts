@@ -838,6 +838,7 @@ export const api = {
     reasoning_effort = "",
     profile_id?: number,
     streaming = true, // 用该配置真实的收发模式来测，别让"流式能通、非流式不通"漏到会话里
+    chatgpt_account_id = "",
     session_header_key = "", // 非空=测试请求也带该自定义会话头（值为一次性 session id）
   ) =>
     // reply = 模型实际回复(已截断);一个字都不回的配置后端直接判失败
@@ -852,7 +853,12 @@ export const api = {
       profile_id,
       streaming,
       session_header_key,
+      chatgpt_account_id,
     }),
+  chatGPTAccounts: () => get<{ accounts: { id: string; email: string; client_id: string; connected: boolean; plan_enabled: boolean }[] }>("/chatgpt/accounts"),
+  chatGPTSignIn: (account_id: string) => post<{ id: string; url: string }>("/chatgpt/sign-in", { account_id }),
+  chatGPTSignInStatus: (id: string) => get<{ status: string; error: string; account_id: string }>(`/chatgpt/sign-in/${encodeURIComponent(id)}`),
+  chatGPTSignOut: (account_id: string) => post<{ ok: boolean; revocation_confirmed: boolean }>("/chatgpt/sign-out", { account_id }),
   llmProfiles: () => get<{ profiles: LLMProfile[] }>("/llm/profiles").then((r) => arr(r.profiles)),
   saveLLMProfile: (p: {
     id?: number; // omit/0 = create; set = update that profile
@@ -861,6 +867,7 @@ export const api = {
     model: string;
     base_url?: string;
     proxy?: string;
+    chatgpt_account_id?: string;
     api_key?: string; // blank on update keeps the existing key
     rate_per_second?: number;
     rate_per_minute?: number;
@@ -884,13 +891,14 @@ export const api = {
   // 全局重试策略（五层各自的次数+间隔）。全 0 = 全部走内置默认。
   llmRetryPolicy: () => get<LLMRetryPolicy>("/llm/retry-policy"),
   saveLLMRetryPolicy: (p: LLMRetryPolicy) => post<LLMRetryPolicy>("/llm/retry-policy", p),
-  fetchLLMModels: (provider: string, base_url: string, api_key: string, proxy = "", profile_id?: number) =>
-    post<{ ok: boolean; error?: string; models?: string[] }>("/llm/models", {
+  fetchLLMModels: (provider: string, base_url: string, api_key: string, proxy = "", profile_id?: number, chatgpt_account_id = "") =>
+    post<{ ok: boolean; error?: string; models?: string[]; catalog?: { slug: string; display_name: string }[] }>("/llm/models", {
       provider,
       base_url,
       api_key,
       proxy,
       profile_id,
+      chatgpt_account_id,
     }),
 
   // ---- agents ----

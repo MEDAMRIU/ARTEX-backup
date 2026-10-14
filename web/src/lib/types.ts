@@ -944,6 +944,7 @@ export interface Settings {
 
 // ---- LLM config ----
 export interface LLMProfile {
+  chatgpt_account_id?: string;
   id: string;
   name: string;
   format: "openai" | "anthropic" | "openai-responses";

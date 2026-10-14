@@ -30,6 +30,8 @@ import { api } from "@/lib/api";
 import type { LLMPoolMember, LLMPoolStatus, LLMProfile, LLMRetryOverride } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+import { ChatGPTAccounts } from "./_components/chatgpt-accounts";
+
 import { ProfileRetryFields, RetryPolicyPanel, ZERO_OVERRIDE } from "./_components/retry";
 
 // 思考开关(thinking.type)与思考强度(reasoning_effort)是两个【互相独立】的字段，
@@ -75,7 +77,7 @@ function cooldownText(secs: number) {
 // 其余状态来自轮询的熔断记录（轮询关着时不会产生新记录，此时「正常」= 没有已知故障）。
 type Health = { label: string; cls: string; hint?: string };
 function healthOf(p: LLMProfile, m?: LLMPoolMember): Health {
-  if (!p.api_key_hint) {
+  if (!p.api_key_hint && !p.chatgpt_account_id) {
     return {
       label: "未配置 Key",
       cls: "border-muted-foreground/40 text-muted-foreground",
@@ -310,6 +312,12 @@ function ProfileSheet({
   onSaved: (id: string) => void;
 }) {
   const isNew = !profile;
+  const [chatGPTAccount, setChatGPTAccount] = React.useState("");
+  const [modelLabels, setModelLabels] = React.useState<Record<string, string>>({});
+  const selectChatGPT = React.useCallback((id: string) => {
+    setChatGPTAccount(id); setModels([]); setModelLabels({}); setModel(""); setApiKey("");
+    if (id) { setFormat("openai-responses"); setBaseUrl("https://api.openai.com/v1"); setProxy(""); setStreaming(true); setMaxTokens("0"); setThinkingType(NONE); setSessionHeaderKey(""); setPoolExclude(true); }
+  }, []);
   const [name, setName] = React.useState("");
   const [format, setFormat] = React.useState<"anthropic" | "openai" | "openai-responses">("anthropic");
   const [model, setModel] = React.useState("");
@@ -335,10 +343,21 @@ function ProfileSheet({
   const [loadingModels, setLoadingModels] = React.useState(false);
   const [modelsOpen, setModelsOpen] = React.useState(false);
 
+  const modelRequest = React.useRef(0);
+  React.useEffect(() => {
+    modelRequest.current++;
+    setModels([]);
+    setModelLabels({});
+    setModelsOpen(false);
+    setLoadingModels(false);
+  }, [open, profile, chatGPTAccount, format, baseUrl, apiKey, proxy]);
+
   // 每次打开时从传入的 profile 灌一遍表单（新建则重置为默认值）。抽屉关掉再打开
   // 就是一次干净的开始，不会留下上一个配置的残影。
   React.useEffect(() => {
     if (!open) return;
+    setChatGPTAccount(profile?.chatgpt_account_id ?? "");
+    setModelLabels({});
     setName(profile?.name ?? "");
     setFormat(profile?.format === "openai" || profile?.format === "openai-responses" ? profile.format : "anthropic");
     setModel(profile?.model ?? "");
@@ -366,21 +385,25 @@ function ProfileSheet({
 
   async function loadModels() {
     if (loadingModels) return;
+    const request = ++modelRequest.current;
     setLoadingModels(true);
     setModels([]);
     try {
-      const r = await api.fetchLLMModels(format, baseUrl, apiKey, proxy, profileId);
+      const r = await api.fetchLLMModels(format, baseUrl, apiKey, proxy, profileId, chatGPTAccount);
+      if (request !== modelRequest.current) return;
       if (r.ok && r.models && r.models.length > 0) {
         setModels(r.models);
+        setModelLabels(Object.fromEntries((r.catalog ?? []).map((m) => [m.slug, m.display_name])));
         setModelsOpen(true);
         toast.success(`已加载 ${r.models.length} 个模型`);
       } else {
         toast.error(`加载模型失败：${r.error ?? "未获取到模型"}`);
       }
     } catch (e) {
+      if (request !== modelRequest.current) return;
       toast.error(`加载模型出错：${(e as Error).message}`);
     } finally {
-      setLoadingModels(false);
+      if (request === modelRequest.current) setLoadingModels(false);
     }
   }
 
@@ -400,6 +423,7 @@ function ProfileSheet({
         toStore(effort),
         profileId,
         streaming,
+        chatGPTAccount,
         sessionHeaderKey.trim(),
       );
       // 回复内容一并展示：看得见模型确实说了话，才算和会话里跑通是一回事。
@@ -431,6 +455,7 @@ function ProfileSheet({
         base_url: baseUrl.trim(),
         proxy: proxy.trim(),
         api_key: apiKey,
+        chatgpt_account_id: chatGPTAccount,
         rate_per_second: Number(rps) || 0,
         rate_per_minute: Number(rpm) || 0,
         context_window_k: Number(cw) || 0,
@@ -480,6 +505,7 @@ function ProfileSheet({
         </SheetHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
+          <ChatGPTAccounts value={chatGPTAccount} onChange={selectChatGPT} />
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="p-name">名称</Label>
@@ -492,7 +518,7 @@ function ProfileSheet({
             </div>
             <div className="grid gap-2">
               <Label>格式</Label>
-              <Select value={format} onValueChange={(v) => setFormat(v as "anthropic" | "openai" | "openai-responses")}>
+              <Select disabled={!!chatGPTAccount} value={format} onValueChange={(v) => setFormat(v as "anthropic" | "openai" | "openai-responses")}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择格式" />
                 </SelectTrigger>
@@ -543,7 +569,7 @@ function ProfileSheet({
                           setModelsOpen(false);
                         }}
                       >
-                        {m}
+                        {modelLabels[m] || m}
                       </button>
                     ))}
                   </PopoverContent>
@@ -555,7 +581,7 @@ function ProfileSheet({
           <div className="grid gap-2">
             <Label htmlFor="p-base-url">Base URL（可选）</Label>
             <Input
-              id="p-base-url"
+              id="p-base-url" disabled={!!chatGPTAccount}
               className="font-mono"
               placeholder="https://api.openai.com/v1"
               value={baseUrl}
@@ -566,7 +592,7 @@ function ProfileSheet({
           <div className="grid gap-2">
             <Label htmlFor="p-proxy">代理（可选）</Label>
             <Input
-              id="p-proxy"
+              id="p-proxy" disabled={!!chatGPTAccount}
               className="font-mono"
               placeholder="socks5://user:pass@127.0.0.1:1080 · http://127.0.0.1:8080"
               value={proxy}
@@ -581,7 +607,7 @@ function ProfileSheet({
           <div className="grid gap-2">
             <Label htmlFor="p-session-header">自定义会话头（可选）</Label>
             <Input
-              id="p-session-header"
+              id="p-session-header" disabled={!!chatGPTAccount}
               className="font-mono"
               placeholder="如 x-session-id（留空=不发送）"
               value={sessionHeaderKey}
@@ -597,7 +623,7 @@ function ProfileSheet({
           <div className="grid gap-2">
             <Label htmlFor="p-api-key">API Key</Label>
             <Input
-              id="p-api-key"
+              id="p-api-key" disabled={!!chatGPTAccount}
               type="password"
               placeholder={keyHint ? `已设置（${keyHint}），留空保持不变` : "sk-…"}
               value={apiKey}
@@ -686,7 +712,7 @@ function ProfileSheet({
                 </p>
               </div>
               <Input
-                id="p-max-tokens"
+                id="p-max-tokens" disabled={!!chatGPTAccount}
                 type="number"
                 min={0}
                 className="w-28 shrink-0"
@@ -927,7 +953,7 @@ export default function LLMPage() {
                     </div>
 
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 pl-6 text-muted-foreground text-xs">
-                      {p.api_key_hint && <span>{p.api_key_hint}</span>}
+                      {p.chatgpt_account_id ? <span>Using ChatGPT plan</span> : p.api_key_hint && <span>{p.api_key_hint}</span>}
                       <span>
                         {p.rate_per_second}/s · {p.rate_per_minute}/min
                       </span>
