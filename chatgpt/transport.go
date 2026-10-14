@@ -108,7 +108,10 @@ func (t *planTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		defer resp.Body.Close()
 		return nil, responseError(resp)
 	}
-	if !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/event-stream") {
+	// OpenAI can omit Content-Type on a valid plan SSE response. The checked
+	// stream below validates frames and requires response.completed regardless.
+	contentType := resp.Header.Get("Content-Type")
+	if contentType != "" && !strings.HasPrefix(contentType, "text/event-stream") {
 		resp.Body.Close()
 		return nil, errors.New("ChatGPT returned a non-streaming response")
 	}

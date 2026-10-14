@@ -433,3 +433,37 @@ func TestCrossManagerSignOutCancelsReturningLogin(t *testing.T) {
 		t.Fatal("sign-out did not persist")
 	}
 }
+
+func TestPlanStreamWithoutContentType(t *testing.T) {
+	f := setup(t)
+	id := f.login(t)
+	f.inference = func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Content-Type"] = nil
+		fmt.Fprint(w, "event: response.output_text.delta\ndata: {\"delta\":\"OK\"}\n\nevent: response.completed\ndata: {\"response\":{\"status\":\"completed\"}}\n\n")
+	}
+	req, _ := http.NewRequest("POST", f.m.api+"/responses", strings.NewReader(`{"model":"gpt-6-sol","input":[]}`))
+	client := &http.Client{Transport: f.m.Transport(id, http.DefaultTransport)}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || !strings.Contains(string(body), "OK") {
+		t.Fatal(string(body), err)
+	}
+	// Missing metadata must not make a JSON body or interrupted stream succeed.
+	f.inference = func(w http.ResponseWriter, r *http.Request) {
+		w.Header()["Content-Type"] = nil
+		fmt.Fprint(w, `{"output":"not an event stream"}`)
+	}
+	req, _ = http.NewRequest("POST", f.m.api+"/responses", strings.NewReader(`{"model":"gpt-6-sol","input":[]}`))
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if _, err = io.ReadAll(resp.Body); err == nil {
+		t.Fatal("non-SSE body accepted")
+	}
+}

@@ -171,3 +171,37 @@ Protocol references:
 - https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions
 - https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference
 - https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations
+
+### Live acceptance follow-up — 14 October 2026
+
+The owner completed ChatGPT consent and requested a live end-to-end test.
+This supersedes the earlier unverified status for sign-in, catalog, inference,
+credential persistence across restart, and the chat/tool/history path.
+
+The first live response was valid SSE with HTTP 200 and no Content-Type header.
+The transport's strict MIME check incorrectly rejected it. The transport now
+allows an absent header and still requires validated SSE with a completion
+event; explicit incompatible MIME types remain rejected. A regression test
+covers both valid headerless SSE and rejection of a headerless JSON body.
+Independent read-only verification passed the stream regression tests.
+
+Live evidence on the local native preview:
+
+- Signed-in account is connected with plan usage enabled; catalog loaded.
+- Restarted the local server with the same encrypted store; no new sign-in needed.
+- Connection test through ARTEX: `gpt-6-sol`, reply `OK`, 4041 ms.
+- Saved profile 1 (`ChatGPT · GPT-6 Sol`) and conversation 1 (`ChatGPT live
+  connection and tool test`), explicitly bound to this profile.
+- Model invoked Read on `smoke-check.txt`, returned its exact random marker and
+  computed 17 + 25 = 42. The marker was supplied only by the tool result.
+- A second chat turn returned the same marker and 84 without further tool calls.
+- No target-site testing, code generation by the test model, API-key billing or
+  paid service operations. These requests used the owner's ChatGPT plan allowance.
+
+Focused `go test -race ./chatgpt`, `go vet ./chatgpt`, `git diff --check` and the
+embedded native rebuild passed. Local evidence is in
+`/tmp/artex-chatgpt-local/{connection-test,tool-test,context-test}.json` and the
+persisted conversation. Actual time-based token renewal remains fixture-tested;
+the live token had not yet reached its renewal window. Task planner/worker
+orchestration, MCP integrations and real target workflows were not covered by
+this bounded chat smoke test.
