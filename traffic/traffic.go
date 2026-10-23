@@ -583,7 +583,7 @@ func (t *Traffic) blobPath(hash string) (string, error) {
 			return p, nil
 		}
 	}
-	return "", fmt.Errorf("blob %s 不存在", hash)
+	return "", fmt.Errorf("blob %s does not exist", hash)
 }
 
 // Blob opens a spilled body for streaming; the caller must close the file.

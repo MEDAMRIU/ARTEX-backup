@@ -18,6 +18,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/config"
+	"github.com/Autumn-27/artex/execution"
 	"github.com/Autumn-27/artex/selfupdate"
 	"github.com/Autumn-27/artex/server"
 )
@@ -37,8 +38,8 @@ const banner = `
 // printBanner writes the startup banner + version/runtime info to stdout.
 func printBanner(addr string) {
 	fmt.Print(banner)
-	fmt.Println("  AI 自主渗透测试系统")
-	fmt.Printf("  版本 %s  ·  %s/%s  ·  %s  ·  监听 %s\n\n",
+	fmt.Println("  AI autonomous penetration testing system")
+	fmt.Printf("  Version %s  ·  %s/%s  ·  %s  ·  Listening on %s\n\n",
 		version, runtime.GOOS, runtime.GOARCH, runtime.Version(), addr)
 }
 
@@ -51,6 +52,13 @@ func main() {
 }
 
 func run() int {
+	if len(os.Args) > 1 && (os.Args[1] == "runtime-worker" || os.Args[1] == "runtime-runner" || os.Args[1] == "runtime-egress") {
+		if err := execution.Command(os.Args[1:]); err != nil {
+			log.Print(err)
+			return 1
+		}
+		return 0
+	}
 	var (
 		addr    = flag.String("addr", "127.0.0.1:8787", "HTTP listen address")
 		dataDir = flag.String("data", filepath.Join(config.BaseDir(), "data"), "data directory for SQLite stores (default: data/ next to the executable)")
@@ -89,9 +97,9 @@ func run() int {
 		cfgPath = abs
 	}
 	if _, e := os.Stat(cfgPath); e == nil {
-		log.Printf("[config] 配置文件: %s", cfgPath)
+		log.Printf("[config] Configuration file: %s", cfgPath)
 	} else {
-		log.Printf("[config] 配置文件: %s (不存在 — 将仅尝试环境变量 ARTEX_PG_DSN)", cfgPath)
+		log.Printf("[config] configuration file: %s (does not exist — will only try environment variable ARTEX_PG_DSN)", cfgPath)
 	}
 
 	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -115,7 +123,7 @@ func run() int {
 	if abs, err := filepath.Abs(skillDir); err == nil {
 		skillDir = abs
 	}
-	log.Printf("[config] skill 目录: %s", skillDir)
+	log.Printf("[config] skill directory: %s", skillDir)
 	keyDir := config.BaseDir()
 	if configured := os.Getenv("ARTEX_AUTH_DIR"); configured != "" {
 		keyDir = configured

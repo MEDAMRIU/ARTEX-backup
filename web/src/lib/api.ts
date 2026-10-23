@@ -121,7 +121,7 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
       document.cookie = "artex_token=; path=/; max-age=0";
       window.location.href = "/login";
     }
-    throw new Error("未授权");
+    throw new Error("Unauthorized");
   }
   if (!r.ok) {
     const fallback = `${init?.method ?? "GET"} ${path}: ${r.status}`;
@@ -143,38 +143,21 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
 // sseUrl builds a URL for Server-Sent Events streams. SSE must NOT go through the
 // Next.js dev `/api` rewrite: that proxy buffers the streamed response, so event
 // frames never reach the browser (the EventSource opens but receives 0 messages).
-// We therefore connect straight to the Go backend, whose CORS is open. Override
-// with NEXT_PUBLIC_SSE_BASE; set it to "" to force same-origin (e.g. behind a
-// production reverse proxy that flushes SSE correctly).
+// Development connects directly to Go; production uses the current origin.
+// NEXT_PUBLIC_SSE_BASE overrides either default, including an explicit empty value.
 // Token is appended as ?token= because SSE bypasses the Next.js proxy and the
 // browser does not send cookies cross-port.
 // mockReport returns a canned Markdown report for the demo.
 function mockReport(_task?: string): string {
-  return `# ARTEX 渗透测试报告 — Acme Corp
-
-## 概览
-- 范围：acme.com（含 www / admin / api / shop / vpn 子域）
-- 已确认发现：6 项（高危 3 · 中危 3 · 低危 2）
-- 引擎模式：exploring
-
-## 关键发现
-1. **[高] 后台默认口令** admin.acme.com admin/admin123 → 可完全接管后台。
-2. **[高] SQL 注入** www.acme.com/search?q= → 可读取 acme_prod 库。
-3. **[高] IDOR** api.acme.com/v1/orders?id= → 可越权读取他人订单（含手机号/地址）。
-4. **[中] 反射型 XSS**、**暴露 .git 源码**、**登录无速率限制**。
-
-## 建议
-- 后台强制改密 + 启用 MFA、封禁默认口令。
-- search 接口参数化查询、输出编码。
-- API 增加对象级授权校验（IDOR）、更换强 JWT 密钥。
-
-> （demo）本报告由 mock 数据生成，仅用于界面演示。`;
+  return "# ARTEX Penetration Test Report — Acme Corp\n\n## Overview\n- Scope: acme.com (including www / admin / api / shop / vpn subdomains)\n- Confirmed findings: 6 (3 high · 3 medium · 2 low)\n- Engine mode: exploring\n\n## Key Findings\n1. **[High] Default admin credentials** admin.acme.com admin/admin123 → full admin takeover.\n2. **[High] SQL injection** www.acme.com/search?q= → read access to the acme_prod database.\n3. **[High] IDOR** api.acme.com/v1/orders?id= → unauthorized access to other users' orders (including phone numbers/addresses).\n4. **[Medium] Reflected XSS**, **exposed .git source code**, **no login rate limiting**.\n\n## Recommendations\n- Require admin password changes + enable MFA; block default credentials.\n- Use parameterized queries and output encoding for the search endpoint.\n- Add object-level authorization checks to the API (IDOR) and replace the JWT secret with a strong one.\n\n> (demo) This report is generated from mock data for UI demonstration only.";
 }
 
 export function sseUrl(path: string): string {
   const base =
     process.env.NEXT_PUBLIC_SSE_BASE ??
-    (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8787` : "");
+    (process.env.NODE_ENV === "development" && typeof window !== "undefined"
+      ? `${window.location.protocol}//${window.location.hostname}:8787`
+      : "");
   const token = getToken();
   const sep = path.includes("?") ? "&" : "?";
   return token ? `${base}${path}${sep}token=${encodeURIComponent(token)}` : `${base}${path}`;
@@ -215,7 +198,10 @@ function interceptPageQuery(page: number, size: number, filter: InterceptApprova
   return query.toString();
 }
 
+export type RuntimeReadiness = { mode: string; task_id?: string; ready: boolean; checked_at?: string; checks: {name: string; status: string; required: boolean; detail: string}[] };
+
 export const api = {
+  runtimeReadiness: (refresh = false) => refresh ? post<RuntimeReadiness>("/runtime/readiness", {}) : get<RuntimeReadiness>("/runtime/readiness"),
   // 后端应用版本号（release 时由 ldflags 注入，默认 "dev"）。
   health: () => get<{ ok: boolean; service: string; version: string }>("/health"),
 
@@ -414,19 +400,19 @@ export const api = {
       headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: fd,
     });
-    if (!r.ok) throw new Error(`上传失败: ${r.status}`);
+    if (!r.ok) throw new Error(`Upload failed: ${r.status}`);
     return r.json() as Promise<{ uploaded: number }>;
   },
   workspaceDownload: async (path: string) => {
     let blob: Blob;
     if (MOCK) {
-      blob = new Blob([`（demo）${path} 的下载内容示例。`], { type: "text/plain" });
+      blob = new Blob([`（demo）${path} sample download content.`], { type: "text/plain" });
     } else {
       const token = getToken();
       const r = await fetch(`/api/workspace/download?path=${encodeURIComponent(path)}`, {
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
-      if (!r.ok) throw new Error(`下载失败: ${r.status}`);
+      if (!r.ok) throw new Error(`Download failed: ${r.status}`);
       blob = await r.blob();
     }
     const objUrl = URL.createObjectURL(blob);
@@ -615,8 +601,8 @@ export const api = {
       { headers: token ? { Authorization: `Bearer ${token}` } : {} },
     );
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: "下载失败" }));
-      throw new Error(error.error ?? "下载失败");
+      const error = await response.json().catch(() => ({ error: "Download failed" }));
+      throw new Error(error.error ?? "Download failed");
     }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
@@ -797,7 +783,7 @@ export const api = {
       headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: fd,
     });
-    if (!r.ok) throw new Error(`上传失败: ${r.status} ${await r.text()}`);
+    if (!r.ok) throw new Error(`Upload failed: ${r.status} ${await r.text()}`);
     return r.json() as Promise<{ attachments: ChatAttachment[] }>;
   },
   stopChat: (taskId: string) => post<{ status: string }>(`/tasks/${taskId}/chat/stop`, {}),
@@ -1054,7 +1040,7 @@ export const api = {
     instructions?: string;
   }) => post<{ name: string }>("/skills", s),
   // uploadSkill installs a skill from a .zip (multipart). Surfaces the backend
-  // error text (e.g. 已存在 / 缺少 SKILL.md) so the UI can show a precise message.
+  // error text (e.g. already exists / missing SKILL.md) so the UI can show a precise message.
   uploadSkill: async (file: File, overwrite = false): Promise<{ name: string; files: number }> => {
     if (MOCK) return { name: file.name.replace(/\.zip$/i, ""), files: 1 };
     const fd = new FormData();
@@ -1066,7 +1052,7 @@ export const api = {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     const body = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(body?.error || `上传失败(${r.status})`);
+    if (!r.ok) throw new Error(body?.error || `Upload failed (${r.status})`);
     return body;
   },
   deleteSkill: (name: string) => del<{ deleted: string }>(`/skills/${name}`),

@@ -1,0 +1,1 @@
+Empty default browser cache. Playwright installs the revision pinned by the runtime lockfile.

@@ -477,9 +477,9 @@ func (i *Interceptor) Judge(ctx context.Context, tool string, arguments json.Raw
 	configJSON, _ := json.Marshal(cfg)
 	out.ConfigDigest = digestInput(configJSON)
 	if out.Message == "" {
-		out.Message = "[模型] " + judgeActionLabel(out.Action)
-	} else if !strings.HasPrefix(out.Message, "[模型]") {
-		out.Message = "[模型] " + out.Message
+		out.Message = "[model] " + judgeActionLabel(out.Action)
+	} else if !strings.HasPrefix(out.Message, "[model]") && !strings.HasPrefix(out.Message, "[\u6a21\u578b]") {
+		out.Message = "[model] " + out.Message
 	}
 	if out.Action == "ask" {
 		out.TimeoutEnabled = true
@@ -665,7 +665,7 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 	}
 }
 
-var ErrAlreadyDecided = errors.New("审批已处理或不存在，请刷新记录")
+var ErrAlreadyDecided = errors.New("approval already handled or does not exist; refresh the record")
 
 // Decide resolves a pending request. Called by the HTTP decide endpoint.
 func (i *Interceptor) Decide(pendingID int64, allowed bool) error {

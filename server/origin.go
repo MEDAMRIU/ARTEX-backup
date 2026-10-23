@@ -40,7 +40,7 @@ func cors(next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 		w.Header().Add("Vary", "Origin")
 		if (origin != "" && !allowedOrigin(r, origin)) || (origin == "" && r.Header.Get("Sec-Fetch-Site") == "cross-site") {
-			writeErr(w, http.StatusForbidden, "请求来源不被允许")
+			writeErr(w, http.StatusForbidden, "Request origin is not allowed")
 			return
 		}
 		if origin != "" {

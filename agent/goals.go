@@ -112,6 +112,7 @@ func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir,
 	// worker="goals" tags the goal nodes' provenance; ts/taskID let set_goals link
 	// each goal under the task root. This is the catalog's real set_goals tool, so a
 	// web-edited description/schema on it applies here too.
+	ctx = WithRunInfo(ctx, RunInfo{TaskID: taskID, ExplorationID: explorationID(ts)})
 	tsx := &ToolSet{as: as, ts: ts, taskID: taskID, worker: "goals"}
 	// Description rides in the user message (same channel as the goal), NOT via the
 	// {{.EngagementDescription}} template var — else a prompt that references the var
@@ -123,7 +124,7 @@ func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir,
 	// Wire add_task_scope only when we have a real asset store + task to write to.
 	// The scope-extraction tail is appended in lockstep so the prompt never asks for
 	// a tool that isn't present.
-	if as != nil && taskID > 0 {
+	if as != nil && taskID > 0 && CurrentExecution() == nil {
 		tools = append(tools, tsx.addTaskScope())
 		sys += goalsScopeTail
 	}

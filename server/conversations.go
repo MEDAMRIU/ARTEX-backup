@@ -30,7 +30,7 @@ func decodeConversationRequest(w http.ResponseWriter, r *http.Request, value any
 	if err := decode(r, value); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeErr(w, http.StatusRequestEntityTooLarge, "请求正文过大")
+			writeErr(w, http.StatusRequestEntityTooLarge, "Request body too large")
 		} else {
 			writeErr(w, http.StatusBadRequest, err.Error())
 		}
@@ -85,7 +85,7 @@ func (s *Server) pgCreateConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	req.AgentKey = strings.TrimSpace(req.AgentKey)
 	if req.AgentKey == "" {
-		writeErr(w, 400, "agent_key 不能为空")
+		writeErr(w, 400, "agent_key cannot be empty")
 		return
 	}
 	if utf8.RuneCountInString(req.AgentKey) > maxConversationAgentKeyRunes {
@@ -98,12 +98,12 @@ func (s *Server) pgCreateConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a == nil {
-		writeErr(w, 404, "agent 不存在")
+		writeErr(w, 404, "agent does not exist")
 		return
 	}
 	if req.LLMProfileID != nil {
 		if _, ok := s.loadProfileConfig(*req.LLMProfileID); !ok {
-			writeErr(w, 400, "指定的 LLM 配置不存在或未设置 API Key")
+			writeErr(w, 400, "The specified LLM configuration does not exist or has no API Key")
 			return
 		}
 	}
@@ -136,7 +136,7 @@ func (s *Server) pgUpdateConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.LLMProfileID != nil {
 		if _, ok := s.loadProfileConfig(*req.LLMProfileID); !ok {
-			writeErr(w, 400, "指定的 LLM 配置不存在或未设置 API Key")
+			writeErr(w, 400, "The specified LLM configuration does not exist or has no API Key")
 			return
 		}
 	}
@@ -183,13 +183,13 @@ func (s *Server) pgRenameConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Title == nil && req.Pinned == nil {
-		writeErr(w, 400, "至少需要提供 title 或 pinned")
+		writeErr(w, 400, "At least title or pinned is required")
 		return
 	}
 	if req.Title != nil {
 		title := strings.TrimSpace(*req.Title)
 		if title == "" {
-			writeErr(w, 400, "标题不能为空")
+			writeErr(w, 400, "Title cannot be empty")
 			return
 		}
 		if utf8.RuneCountInString(title) > maxConversationTitleRunes {
@@ -260,7 +260,7 @@ func (s *Server) pgDeleteConversationsBatch(w http.ResponseWriter, r *http.Reque
 	seen := make(map[int64]struct{}, len(request.IDs))
 	for _, id := range request.IDs {
 		if id <= 0 {
-			writeErr(w, http.StatusBadRequest, "对话 id 无效")
+			writeErr(w, http.StatusBadRequest, "Invalid conversation id")
 			return
 		}
 		if _, exists := seen[id]; exists {
@@ -400,7 +400,7 @@ func (s *Server) pgSendConversationMessage(w http.ResponseWriter, r *http.Reques
 	}
 	msg := strings.TrimSpace(req.Message)
 	if msg == "" && len(req.Attachments) == 0 {
-		writeErr(w, 400, "消息不能为空")
+		writeErr(w, 400, "Message cannot be empty")
 		return
 	}
 	agentMessage, ok := s.prepareChatMentionMessage(w, msg)
@@ -420,7 +420,7 @@ func (s *Server) pgSendConversationMessage(w http.ResponseWriter, r *http.Reques
 	s.chatMu.Lock()
 	if s.chatBusy[busyKey] {
 		s.chatMu.Unlock()
-		writeErr(w, 409, "该会话正在处理上一条消息，请稍候")
+		writeErr(w, 409, "This session is processing the previous message. Please wait")
 		return
 	}
 	s.chatBusy[busyKey] = true
@@ -564,7 +564,7 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 		finishReason = err.Error()
 		if ctx.Err() == nil {
 			_, _ = pg.AppendConvActivity(c.ID, db.Activity{Worker: c.AgentKey, Kind: "text", IsError: true,
-				Summary: "（出错：" + err.Error() + "）", Detail: err.Error()})
+				Summary: "(Error: " + err.Error() + "）", Detail: err.Error()})
 		}
 	} else {
 		finishStatus, finishReason = "completed", ""

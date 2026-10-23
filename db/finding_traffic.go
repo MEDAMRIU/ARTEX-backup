@@ -14,7 +14,7 @@ import (
 
 var (
 	ErrEvidenceConflict = errors.New("流量证据已变更，请刷新后重试")
-	ErrFindingNotFound  = errors.New("漏洞不存在")
+	ErrFindingNotFound  = errors.New("finding does not exist")
 	ErrEvidenceNotFound = errors.New("流量证据不存在")
 )
 

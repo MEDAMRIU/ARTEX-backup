@@ -1,0 +1,5 @@
+# Load deployment/artex-runner.apparmor before using this Ubuntu override.
+services:
+  runner:
+    security_opt:
+      - apparmor=artex-runner

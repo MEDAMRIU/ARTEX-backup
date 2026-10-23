@@ -35,7 +35,7 @@ export function FindingLineageView({ findingId }: { findingId: string }) {
   if (loaded && nodes.length === 0) {
     return (
       <p className="text-muted-foreground p-6 text-sm">
-        无链路可展示（该漏洞未关联探索节点，或所属任务已删除）。
+        {"No exploration path to display (this vulnerability has no linked exploration nodes, or its task was deleted)."}
       </p>
     );
   }
@@ -45,7 +45,7 @@ export function FindingLineageView({ findingId }: { findingId: string }) {
       nodes={nodes}
       edges={edges}
       className="h-[68vh]"
-      emptyHint={loaded ? "无链路" : "加载中…"}
+      emptyHint={loaded ? "No chain" : "Loading…"}
     />
   );
 }

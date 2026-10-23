@@ -76,7 +76,7 @@ func (s *Server) startFindingRetest(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Notes = strings.TrimSpace(req.Notes)
 	if utf8.RuneCountInString(req.Notes) > 4000 {
-		writeErr(w, 400, "复测补充说明最多 4000 个字符")
+		writeErr(w, 400, "Additional retest notes cannot exceed 4000 characters")
 		return
 	}
 	f, err := pg.GetFinding(id)
@@ -94,7 +94,7 @@ func (s *Server) startFindingRetest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a == nil || !a.Enabled {
-		writeErr(w, 409, "漏洞复测 Agent 不存在或未启用，请在 Agent 管理中配置 retester")
+		writeErr(w, 409, "Vulnerability retest Agent is missing or disabled; configure retester in Agent management")
 		return
 	}
 	for _, key := range []string{"get_finding_retest_context", "record_finding_retest_result"} {
@@ -104,7 +104,7 @@ func (s *Server) startFindingRetest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if t == nil || !t.Enabled || !slices.Contains(t.Agents, a.Key) {
-			writeErr(w, 409, "请为复测 Agent 启用并绑定工具："+key)
+			writeErr(w, 409, "Enable and bind tools for the retest agent:"+key)
 			return
 		}
 	}
@@ -113,7 +113,7 @@ func (s *Server) startFindingRetest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.ctx.Err() != nil {
-		writeErr(w, 503, "服务正在停止")
+		writeErr(w, 503, "Service is stopping")
 		return
 	}
 	retest, conv, created, err := pg.CreateFindingRetest(r.Context(), id, req.Notes)
@@ -150,7 +150,7 @@ func (s *Server) findingRetestTools() []actool.CoreTool {
 					return actool.Errorf(err.Error()), nil
 				}
 				if r == nil {
-					return actool.Errorf("当前会话未关联复测记录，请从漏洞详情发起复测"), nil
+					return actool.Errorf("This session has no linked retest record; start a retest from vulnerability details"), nil
 				}
 				var constraints []db.Constraint
 				f, err := s.m.pg.GetFinding(r.FindingID)

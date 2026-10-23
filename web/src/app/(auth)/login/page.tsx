@@ -32,7 +32,7 @@ export default function LoginPage() {
       .then(({ initialized }) => {
         if (!initialized) router.replace("/setup");
       })
-      .catch(() => setError("无法连接到后端服务"))
+      .catch(() => setError("Unable to connect to the backend service"))
       .finally(() => setChecking(false));
   }, [router]);
 
@@ -45,7 +45,7 @@ export default function LoginPage() {
       auth.setToken(token);
       window.location.replace("/function/tasks");
     } catch {
-      setError("用户名或密码错误");
+      setError("Incorrect username or password");
     } finally {
       setLoading(false);
     }
@@ -54,7 +54,7 @@ export default function LoginPage() {
   if (checking) {
     return (
       <div role="status" className="flex min-h-dvh items-center justify-center text-muted-foreground">
-        正在检查登录状态…
+        {"Checking login status…"}
       </div>
     );
   }
@@ -76,29 +76,29 @@ export default function LoginPage() {
       <div className="flex w-full items-center justify-center bg-background p-8 lg:w-2/3">
         <div className="w-full max-w-md space-y-10 py-24 lg:py-32">
           <div className="space-y-4 text-center">
-            <h2 className="text-2xl font-medium tracking-tight">登录</h2>
-            <p className="mx-auto max-w-xl text-muted-foreground">欢迎回来，请输入密码以继续使用 ARTEX</p>
+            <h2 className="text-2xl font-medium tracking-tight">{"Log in"}</h2>
+            <p className="mx-auto max-w-xl text-muted-foreground">{"Welcome back. Enter your password to continue using ARTEX"}</p>
           </div>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="space-y-1.5">
-              <Label htmlFor="username">用户名</Label>
+              <Label htmlFor="username">{"Username"}</Label>
               <Input id="username" value="ARTEX" readOnly className="bg-muted text-muted-foreground" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="password">密码</Label>
+              <Label htmlFor="password">{"Password"}</Label>
               <Input
                 id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="请输入密码"
+                placeholder={"Enter your password"}
                 autoFocus
                 autoComplete="current-password"
               />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading || !password}>
-              {loading ? "登录中..." : "登录"}
+              {loading ? "Signing in..." : "Log in"}
             </Button>
           </form>
         </div>

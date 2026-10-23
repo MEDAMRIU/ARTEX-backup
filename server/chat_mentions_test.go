@@ -349,3 +349,18 @@ func TestChatMentionConversationReceivesServerDetails(t *testing.T) {
 		t.Fatal("invalid reference persisted a turn")
 	}
 }
+
+func TestEnglishMentionKindsAndLegacyDeduplication(t *testing.T) {
+	labels := []string{"Finding", "Asset", "Organization", "Endpoint", "IP", "Application", "Domain", "Subdomain", "Service"}
+	kinds := []string{"finding", "asset", "company", "endpoint", "ip", "app", "root_domain", "subdomain", "service"}
+	for i, label := range labels {
+		refs, err := parseChatMentions("@[" + label + "#42 Reference record]")
+		if err != nil || len(refs) != 1 || refs[0].Kind != kinds[i] || refs[0].ID != 42 {
+			t.Fatalf("%s did not roundtrip: %v %v", label, refs, err)
+		}
+	}
+	refs, err := parseChatMentions("@[漏洞#42 legacy] @[Finding#42 current]")
+	if err != nil || len(refs) != 1 {
+		t.Fatalf("legacy/current duplicates: %v %v", refs, err)
+	}
+}

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -26,7 +27,7 @@ import (
 // contiguous run is coalesced into a single record so the trace shows whole
 // messages, not dozens of fragments.
 func captureRun(ctx context.Context, opts agentcore.Options, input string, emit func(db.Activity)) (string, harness.TerminalReason, error) {
-	s := agentcore.NewSession(opts)
+	s := agentcore.NewSession(executionOptions(opts))
 	defer s.Close() // release the session's background-task manager (temp dir + processes)
 	return captureRunSession(ctx, s, input, emit)
 }
@@ -39,6 +40,15 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 	defer auditTrace.Finish()
 	var reason harness.TerminalReason
 	rec := func(r db.Activity) {
+		if r.IsError && r.Kind == "result" {
+			if c := CurrentExecution(); c != nil {
+				ri := RunInfoFrom(ctx)
+				if strconv.FormatInt(ri.TaskID, 10) == c.TaskID {
+					c.Fail(r.Summary)
+				}
+			}
+		}
+
 		if r.Kind == "text" || r.Kind == "tool_result" {
 			auditTrace.Append(db.InterceptContextEntry{Kind: r.Kind, Tool: r.Tool, ToolUseID: r.ToolUseID, Text: r.Detail, IsError: r.IsError})
 		}

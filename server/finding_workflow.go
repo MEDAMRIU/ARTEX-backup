@@ -117,26 +117,26 @@ func objectProperty(parent map[string]any, key string) map[string]any {
 
 func (s *Server) agentFindingTrafficAccess(ctx context.Context, id int64, write bool) error {
 	if id <= 0 {
-		return errors.New("finding_id 必须为独立漏洞记录 ID；不是探索节点 ID")
+		return errors.New("finding_id must be a standalone vulnerability record ID, not an exploration node ID")
 	}
 	f, err := s.m.pg.GetFinding(id)
 	if err != nil {
 		return err
 	}
 	if f == nil {
-		return fmt.Errorf("%w：finding_id=%d。证据工具使用独立漏洞记录 ID，请从 list_task_findings / get_task_node_detail 的 finding_id 字段读取；不要传 id / finding_node_id", db.ErrFindingNotFound, id)
+		return fmt.Errorf("%w: finding_id=%d. Evidence tools use the separate vulnerability record ID; read the finding_id field from list_task_findings / get_task_node_detail. Do not pass id / finding_node_id", db.ErrFindingNotFound, id)
 	}
 	if ri := agent.RunInfoFrom(ctx); ri.TaskID > 0 {
 		task := s.m.ResolveTask(strconv.FormatInt(ri.TaskID, 10))
 		if task == nil {
-			return errors.New("任务不存在")
+			return errors.New("Task not found")
 		}
 		_, inherited, allowed := findingProvenanceInTask(task, f.TaskID)
 		if !allowed {
-			return errors.New("当前任务不可读取该漏洞")
+			return errors.New("The current task cannot read this vulnerability")
 		}
 		if write && inherited {
-			return errors.New("继承漏洞的流量证据只读，请到来源任务修改")
+			return errors.New("Traffic evidence for inherited vulnerabilities is read-only; modify it in the source task")
 		}
 	}
 	return nil
@@ -147,7 +147,7 @@ func (s *Server) toolBindFindingTraffic() actool.CoreTool {
 		objSchema(map[string]any{"finding_id": strParam("独立漏洞记录 ID，从 list_task_findings / get_task_node_detail 的 finding_id 字段读取"), "traffic_refs": agent.HintTrafficSchema()}, "finding_id", "traffic_refs"),
 		func(ctx context.Context, raw json.RawMessage) (actool.Result, error) {
 			if !s.m.pg.GetBool(settingAgentTrafficBinding, false) {
-				return actool.Errorf("Agent 自动绑定流量已关闭；请在系统设置开启，或使用页面人工绑定。"), nil
+				return actool.Errorf("Automatic Agent traffic linking is disabled; enable it in system settings or link traffic manually on the page."), nil
 			}
 			var args struct {
 				FindingID json.RawMessage `json:"finding_id"`
@@ -161,7 +161,7 @@ func (s *Server) toolBindFindingTraffic() actool.CoreTool {
 				return actool.Errorf(err.Error()), nil
 			}
 			if len(args.Refs) == 0 {
-				return actool.Errorf("补绑需要至少一条已核实的 traffic_refs；无流量无需调用此工具"), nil
+				return actool.Errorf("Additional linking requires at least one verified traffic_refs entry; do not call this tool when there is no traffic"), nil
 			}
 			list, err := s.evidenceStore().Bind(ctx, id, args.Refs)
 			if err != nil {

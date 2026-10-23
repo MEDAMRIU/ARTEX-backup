@@ -22,6 +22,7 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/chatgpt"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/execution"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/artex/llmrec"
@@ -39,6 +40,7 @@ var BuildVersion = "dev"
 // Server exposes the ARTEX backend over a JSON HTTP API for the shadcn/ui
 // frontend.
 type Server struct {
+	runner  *execution.Client
 	chatGPT *chatgpt.Manager
 	m       *Manager
 	engine  *Engine
@@ -142,11 +144,15 @@ type triggeredRun struct {
 }
 
 func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDir string) *Server {
+	runner, err := execution.NewClientFromEnv(dataDir)
+	if err != nil {
+		log.Fatalf("[runtime] isolated execution configuration: %v", err)
+	}
 	key, err := loadOrCreateJWTKey(keyDir, dataDir)
 	if err != nil {
 		log.Fatalf("[auth] JWT key: %v", err)
 	}
-	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, chatBusy: map[string]bool{},
+	s := &Server{runner: runner, m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, chatBusy: map[string]bool{},
 		chatCancel: map[string]context.CancelCauseFunc{}, triggerQ: map[string][]triggeredRun{},
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
@@ -159,6 +165,8 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	if ctx.Done() != nil {
 		go func() { <-ctx.Done(); s.chatGPT.Close() }()
 	}
+	s.initRuntime()
+	agent.ConfigureExecution(runner)
 	s.initSideQuestions()
 	// 熔断阈值/冷却是失败路径上的热参数，启动时把全局重试策略推给 Registry 一次；
 	// 之后每次保存策略再推一次（saveLLMRetryPolicy）。
@@ -167,6 +175,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 	// that router through Agent bindings and then the global provider, so adding a
 	// first chain to a running task takes effect on its very next LLM call.
 	s.engine.SetAuthoritativeAgentResolver(func(t *Task) (*agent.Planner, *agent.Worker) {
+		if runner != nil && !runner.ReadyFor(t.ID) {
+			return nil, nil
+		}
 		if !s.taskRuntimeAvailable(t, "planner", "worker") {
 			return nil, nil
 		}
@@ -238,7 +249,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		go newScheduler(s).Run(s.ctx) // P3 触发器调度(定时/finding/目标事件),仅自定义 agent
 		// Fill the tool cache for any enabled MCP that has none yet (notably the
 		// seeded browser MCP on first run). Async so it never blocks startup.
-		go s.discoverEmptyMCPsOnStartup()
+		if s.runner == nil {
+			go s.discoverEmptyMCPsOnStartup()
+		}
 		logSink.SetDB(ctx, m.pg) // restore last 100 log rows and enable async persistence
 	}
 	// precedence: persisted DB config > env.
@@ -275,7 +288,7 @@ func (s *Server) restoreTaskRuntimes() {
 		// clear stale 'running' intents from a prior crash/restart (no live worker
 		// owns them) so they re-claim instead of spinning forever in the UI.
 		if n, _ := t.Store.ResetRunningIntents(); n > 0 {
-			log.Printf("[engine] task %s 重置 %d 个残留 running 意图为 open", t.ID, n)
+			log.Printf("[engine] task %s reset %d remaining running intents to open", t.ID, n)
 		}
 		if lifecycle.Paused {
 			s.engine.Pause(t.ID, agent.AbortPausedOnReload)
@@ -665,6 +678,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/change-password", s.authChangePassword)
 
 	mux.HandleFunc("GET /api/health", s.health)
+	mux.HandleFunc("GET /api/runtime/readiness", s.runtimeReadiness)
+	mux.HandleFunc("POST /api/runtime/readiness", s.runtimeReadiness)
 	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("GET /api/logs", s.getLogs)
 	mux.HandleFunc("GET /api/logs/history", s.getLogsHistory)
@@ -1021,26 +1036,33 @@ func (s *Server) listTasks(w http.ResponseWriter, r *http.Request) {
 		active = t.ID
 	}
 	list := s.m.List()
-	metrics, _ := s.m.PG().TaskListMetricsAll()
+	metrics, err := s.m.PG().TaskListMetricsAll()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "unable to load task metrics")
+		return
+	}
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
 	dtos := make([]TaskDTO, 0, len(list))
 	for _, t := range list {
 		dto := taskDTO(t, s.resolvedTaskStatus(t))
 		applyTaskArchiveBlocker(&dto, archiveBlockers)
-		metric := metrics[t.ExpID]
-		dto.Tokens = tokenTotalDTO(metric.Tokens)
-		// prefer the live in-memory heartbeat (fresher) and fall back to the
-		// persisted max activity time (survives restarts) for run-duration display.
-		dto.LastActivity = metric.LastActivity
-		if live := s.engine.LastActivity(t.ID); live > dto.LastActivity {
-			dto.LastActivity = live
-		}
-		dto.GoalsTotal = metric.Goals.Total
-		dto.GoalsMet = metric.Goals.Met
-		dto.InFlight = metric.RunningIntents
+		s.applyTaskMetrics(&dto, t, metrics[t.ExpID])
 		dtos = append(dtos, dto)
 	}
 	writeJSON(w, 200, map[string]any{"tasks": dtos, "active": active})
+}
+
+func (s *Server) applyTaskMetrics(dto *TaskDTO, t *Task, metric db.TaskListMetrics) {
+	dto.Tokens = tokenTotalDTO(metric.Tokens)
+	dto.LastActivity = metric.LastActivity
+	if s.engine != nil {
+		if live := s.engine.LastActivity(t.ID); live > dto.LastActivity {
+			dto.LastActivity = live
+		}
+	}
+	dto.GoalsTotal = metric.Goals.Total
+	dto.GoalsMet = metric.Goals.Met
+	dto.InFlight = metric.RunningIntents
 }
 
 func (s *Server) resolvedTaskStatus(t *Task) string {
@@ -1122,7 +1144,7 @@ func (s *Server) controlIntent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.engine.beginTaskOperation(t.ID) {
-		writeErr(w, 409, "任务正在删除，无法控制意图")
+		writeErr(w, 409, "Task is being deleted; cannot control intents")
 		return
 	}
 	defer s.engine.decInflight(t.ID)
@@ -1179,7 +1201,7 @@ func (s *Server) rerunIntent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.engine.beginTaskOperation(t.ID) {
-		writeErr(w, 409, "任务正在删除，无法重跑意图")
+		writeErr(w, 409, "Task is being deleted; cannot rerun intents")
 		return
 	}
 	defer s.engine.decInflight(t.ID)
@@ -1194,7 +1216,7 @@ func (s *Server) rerunIntent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !reopened {
-		writeErr(w, 409, "该意图不是可重跑状态(仅 blocked/exhausted/stopped 可重跑)")
+		writeErr(w, 409, "This intent cannot be rerun in its current state (only blocked/exhausted/stopped can be rerun)")
 		return
 	}
 	queued, err := s.admitTask(t, "resume")
@@ -1205,7 +1227,7 @@ func (s *Server) rerunIntent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
-	log.Printf("[task] #%s 意图 #%d 已重开(重跑)", t.ID, iid)
+	log.Printf("[task] #%s intent #%d reopened (rerun)", t.ID, iid)
 	writeJSON(w, 200, map[string]any{"id": t.ID, "reopened": iid, "queued": queued})
 }
 
@@ -1218,7 +1240,7 @@ func (s *Server) rerunBlocked(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.engine.beginTaskOperation(t.ID) {
-		writeErr(w, 409, "任务正在删除，无法重跑意图")
+		writeErr(w, 409, "Task is being deleted; cannot rerun intents")
 		return
 	}
 	defer s.engine.decInflight(t.ID)
@@ -1255,7 +1277,7 @@ func (s *Server) rerunBlocked(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 500, err.Error())
 			return
 		}
-		log.Printf("[task] #%s 批量重开 %d 条 blocked 意图", t.ID, n)
+		log.Printf("[task] #%s reopened %d blocked intents in bulk", t.ID, n)
 	}
 	writeJSON(w, 200, map[string]any{"id": t.ID, "reopened": n, "queued": queued})
 }
@@ -1468,11 +1490,11 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	for _, raw := range req.SourceTaskIDs {
 		id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 		if err != nil || id <= 0 || seenSources[id] {
-			writeErr(w, 400, "关联任务 id 无效或重复")
+			writeErr(w, 400, "Linked task id is invalid or duplicated")
 			return
 		}
 		if _, ok := s.m.Task(strconv.FormatInt(id, 10)); !ok {
-			writeErr(w, 400, fmt.Sprintf("关联任务 #%d 不存在", id))
+			writeErr(w, 400, fmt.Sprintf("linked task #%d does not exist", id))
 			return
 		}
 		seenSources[id] = true
@@ -1492,17 +1514,17 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, db.ErrTaskCategoryInvalid) || errors.Is(err, db.ErrTaskCategoryNotFound) {
-			writeErr(w, 400, "任务分类不存在或无效")
+			writeErr(w, 400, "Task category does not exist or is invalid")
 			return
 		}
 		if errors.Is(err, db.ErrTaskCompanyIDsInvalid) || errors.Is(err, db.ErrTaskCompanyNotFound) {
-			writeErr(w, 400, "关联企业不存在或无效")
+			writeErr(w, 400, "Linked organization does not exist or is invalid")
 			return
 		}
 		writeErr(w, 500, err.Error())
 		return
 	}
-	log.Printf("[task] 新建任务 #%s «%s» 目标: %s", t.ID, req.Description, req.Goal)
+	log.Printf("[task] Created task #%s «%s» goal: %s", t.ID, req.Description, req.Goal)
 	// 共享的建后流程(seed + 种子意图 + 后台目标分解 + engine.Run),与 spawn_task 复用同一段。
 	// launchTask 内部异步,不阻塞 UI —— 目标分解在后台可见地进行。
 	s.launchTask(t, req.Description+" "+req.Goal, req.SeedFirstIntent != nil && *req.SeedFirstIntent)
@@ -1513,11 +1535,11 @@ func (s *Server) validateTaskProfileIDs(ids []int64) error {
 	seen := map[int64]bool{}
 	for _, id := range ids {
 		if id <= 0 || seen[id] {
-			return fmt.Errorf("LLM 配置 id 无效或重复")
+			return fmt.Errorf("LLM configuration id is invalid or duplicated")
 		}
 		seen[id] = true
 		if _, ok := s.loadProfileConfig(id); !ok {
-			return fmt.Errorf("LLM 配置 #%d 不存在或未设置 API Key", id)
+			return fmt.Errorf("LLM configuration #%d does not exist or has no API Key", id)
 		}
 	}
 	return nil
@@ -1642,12 +1664,12 @@ func (s *Server) llmHost() string {
 func (s *Server) seed(t *Task, text string) {
 	scheme, host, port, ok := parseTarget(text)
 	if !ok {
-		log.Printf("[seed] task %s: 未能从 %q 解析出目标 host/IP，不创建站点（请手动配置 scope）", t.ID, text)
+		log.Printf("[seed] task %s: could not parse target host/IP from %q; no site created (configure scope manually)", t.ID, text)
 		return
 	}
 	// P0-1 guard: never treat the configured LLM gateway as a target.
 	if gw := s.llmHost(); gw != "" && host == gw {
-		log.Printf("[seed] task %s: 目标 %q 是 LLM 网关，拒绝作为渗透目标", t.ID, host)
+		log.Printf("[seed] task %s: target %q is an LLM gateway; refusing to use it as a penetration test target", t.ID, host)
 		return
 	}
 
@@ -1676,7 +1698,7 @@ func (s *Server) seed(t *Task, text string) {
 			_ = t.Store.Anchor(begin, rootID)
 		}
 	}
-	log.Printf("[seed] task %s: 目标站点 %s", t.ID, u)
+	log.Printf("[seed] task %s: target site %s", t.ID, u)
 	// 不在这里 Notify:首轮是否触发统一由 engine.Run 的 HasActiveIntent 决定(种子意图任务
 	// 跳过首轮)。seed 早于 Run 执行,若在此 Notify 会 buffered 到通道、被 plannerLoop 启动时
 	// 消费掉而绕过 Run 的门控 → 种子任务仍误触发首轮。
@@ -1691,13 +1713,13 @@ func (s *Server) seedFirstIntent(t *Task) {
 	summary := fmt.Sprintf("完成任务目标：%s（任务：%s）", t.Goal, t.Description)
 	id, err := t.Store.AddIntent(map[string]any{"summary": summary}, 8, nil, "seed")
 	if err != nil {
-		log.Printf("[seed] task %s: 下发种子意图失败: %v", t.ID, err)
+		log.Printf("[seed] task %s: failed to dispatch seed intent: %v", t.ID, err)
 		return
 	}
 	if origin, _ := t.Store.OriginFactID(); origin > 0 {
 		_ = t.Store.Link(origin, db.RelDerivedFrom, id)
 	}
-	log.Printf("[seed] task %s: 已下发种子意图 #%d", t.ID, id)
+	log.Printf("[seed] task %s: seed intent #%d dispatched", t.ID, id)
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
@@ -1709,6 +1731,12 @@ func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
 	dto := taskDTO(t, s.resolvedTaskStatus(t))
 	archiveBlockers, _ := s.m.PG().TaskArchiveBlockers()
 	applyTaskArchiveBlocker(&dto, archiveBlockers)
+	metrics, err := s.m.PG().TaskListMetricsAll()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "unable to load task metrics")
+		return
+	}
+	s.applyTaskMetrics(&dto, t, metrics[t.ExpID])
 	writeJSON(w, 200, dto)
 }
 
@@ -1721,7 +1749,7 @@ func (s *Server) taskCoverage(w http.ResponseWriter, r *http.Request) {
 	}
 	as := s.m.Assets()
 	if as == nil {
-		writeErr(w, 503, "asset store 未启用")
+		writeErr(w, 503, "asset store is disabled")
 		return
 	}
 	// 资产覆盖度功能关闭 → 短路返回 {enabled:false}，前端据此隐藏覆盖度卡片/进度。
@@ -1749,7 +1777,7 @@ func (s *Server) taskCoverageGraph(w http.ResponseWriter, r *http.Request) {
 	}
 	as := s.m.Assets()
 	if as == nil {
-		writeErr(w, 503, "asset store 未启用")
+		writeErr(w, 503, "asset store is disabled")
 		return
 	}
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
@@ -1771,7 +1799,7 @@ func (s *Server) taskAssetRefs(w http.ResponseWriter, r *http.Request) {
 	}
 	assetID, _ := strconv.ParseInt(r.URL.Query().Get("asset_id"), 10, 64)
 	if assetID <= 0 {
-		writeErr(w, 400, "需要 asset_id")
+		writeErr(w, 400, "asset_id is required")
 		return
 	}
 	refs, err := t.Store.AssetRefsWithSources(assetID)
@@ -1805,7 +1833,7 @@ func (s *Server) taskScopeList(w http.ResponseWriter, r *http.Request) {
 	}
 	as := s.m.Assets()
 	if as == nil {
-		writeErr(w, 503, "asset store 未启用")
+		writeErr(w, 503, "asset store is disabled")
 		return
 	}
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
@@ -1825,7 +1853,7 @@ func (s *Server) taskScopeAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	as := s.m.Assets()
 	if as == nil {
-		writeErr(w, 503, "asset store 未启用")
+		writeErr(w, 503, "asset store is disabled")
 		return
 	}
 	var body struct {
@@ -1854,7 +1882,7 @@ func (s *Server) taskScopeDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	as := s.m.Assets()
 	if as == nil {
-		writeErr(w, 503, "asset store 未启用")
+		writeErr(w, 503, "asset store is disabled")
 		return
 	}
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
@@ -3210,7 +3238,7 @@ func (s *Server) getTrafficBlob(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", hash+".bin"))
 	if _, err := io.Copy(w, f); err != nil {
-		log.Printf("[traffic] 下载 blob %s 中断：%v", hash, err)
+		log.Printf("[traffic] Download of blob %s interrupted: %v", hash, err)
 	}
 }
 
@@ -3259,7 +3287,7 @@ func (s *Server) settingsPayload() map[string]any {
 func (s *Server) pgDetectPython(w http.ResponseWriter, r *http.Request) {
 	p := detectPython()
 	if p == "" {
-		writeErr(w, 404, "未检测到 python(python3/python 均不在 PATH)")
+		writeErr(w, 404, "Python not detected (neither python3 nor python is in PATH)")
 		return
 	}
 	if err := s.m.pg.SetSetting(settingPythonInterp, p); err != nil {
@@ -3523,7 +3551,7 @@ func (s *Server) newMainSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.engine.IsDeleting(t.ID) {
-		writeErr(w, 409, "任务正在删除，无法新建会话")
+		writeErr(w, 409, "Task is being deleted; cannot create sessions")
 		return
 	}
 	m, err := t.Store.NewMainSession()
@@ -3541,7 +3569,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.engine.IsDeleting(t.ID) {
-		writeErr(w, 409, "任务正在删除，无法发送新消息")
+		writeErr(w, 409, "Task is being deleted; cannot send new messages")
 		return
 	}
 	// 注意:任务暂停(paused)不拦截主 Agent 对话。主 Agent 编排会话独立于 planner/
@@ -3565,12 +3593,12 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	s.chatMu.Lock()
 	if s.engine.IsDeleting(t.ID) {
 		s.chatMu.Unlock()
-		writeErr(w, 409, "任务正在删除，无法发送新消息")
+		writeErr(w, 409, "Task is being deleted; cannot send new messages")
 		return
 	}
 	if s.chatBusy[t.ID] {
 		s.chatMu.Unlock()
-		writeErr(w, 409, "主 Agent 正在处理上一条消息，请稍候")
+		writeErr(w, 409, "The main agent is processing the previous message. Please wait")
 		return
 	}
 	ctx, cancel := context.WithCancelCause(s.ctx)
@@ -3630,7 +3658,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			_, err := ma.Chat(ctx, maTaskID, mainSeg, s.m.Assets(), t.Store, t.Goal, agentMsg, emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)
 			s.engine.EndLLMCall(t.ID)
 			if err != nil && ctx.Err() == nil {
-				s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", IsError: true, Summary: "（主 Agent 出错：" + err.Error() + "）", MainSeg: segPtr})
+				s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", IsError: true, Summary: "(Main Agent error: " + err.Error() + "）", MainSeg: segPtr})
 			}
 		}()
 		writeJSON(w, 202, map[string]any{"status": "accepted", "mode": "llm"})
@@ -3722,17 +3750,55 @@ func (s *Server) getReport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "no active task")
 		return
 	}
-	findings, _ := t.Store.ListByKind(db.KindFinding, 1000) // 纯漏洞（事实是独立的 KindFact，不进报告）
-	counts := map[string]int{}
-	for _, ty := range []string{"root_domain", "ip", "subdomain", "app", "service", "endpoint"} {
-		ns, _ := s.m.Assets().QueryByType(ty, 100000, 0)
-		if len(ns) > 0 {
-			counts[ty] = len(ns)
+	findings, err := t.Store.ListByKind(db.KindFinding, 10000)
+	if err != nil {
+		writeErr(w, 500, "unable to load findings")
+		return
+	}
+	facts, err := t.Store.ListByKind(db.KindFact, 10000)
+	if err != nil {
+		writeErr(w, 500, "unable to load assessment evidence")
+		return
+	}
+	intents, err := t.Store.ListByKind(db.KindIntent, 10000)
+	if err != nil {
+		writeErr(w, 500, "unable to load assessment work")
+		return
+	}
+	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
+	counts, err := s.m.Assets().CountsByTypeForTask(taskID)
+	if err != nil {
+		writeErr(w, 500, "unable to load task assets")
+		return
+	}
+	artifacts, assessments, limits := collectReportArtifacts(s.m.dir, t.ID)
+	activities, _, activityErr := t.Store.ActivityList(nil, 0, 20000)
+	if activityErr != nil {
+		writeErr(w, 500, "unable to load runtime limitations")
+		return
+	}
+	for _, activity := range activities {
+		if activity.IsError {
+			limits = append(limits, fmt.Sprintf("Activity %d (%s/%s): %s", activity.ID, activity.Kind, activity.Tool, activity.Summary))
 		}
+	}
+	if len(activities) == 20000 {
+		limits = append(limits, "Activity export reached 20,000 records; later errors may not be included.")
+	}
+	if blocked, _, e := s.m.pg.GetSetting("runtime_blocked_" + t.ID); e != nil {
+		writeErr(w, 500, "unable to load runtime status")
+		return
+	} else if blocked != "" {
+		limits = append(limits, "Assessment runtime failed: "+blocked)
+	}
+
+	if len(findings) == 10000 || len(facts) == 10000 || len(intents) == 10000 {
+		limits = append(limits, "Graph export reached the 10,000-record limit for at least one category.")
 	}
 	md := report.Markdown(report.Input{
 		Title: t.Description, Goal: t.Goal, GeneratedAt: time.Now(),
-		AssetCounts: counts, Findings: findings,
+		AssetCounts: counts, Findings: findings, Facts: facts, Intents: intents,
+		Artifacts: artifacts, Assessments: assessments, Limitations: limits,
 	})
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.WriteHeader(200)

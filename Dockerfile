@@ -9,7 +9,13 @@
 #   cp -r web/out server/webui/dist
 #   CGO_ENABLED=0 GOARCH=amd64 go build -tags embedui -o dist/amd64/artex ./cmd/artex
 #   docker build -t artex:local .
-FROM node:22-bookworm-slim@sha256:c3de60bf2f9dd0ac6370e6117950ff62d6e339527e7472301c9c78a017978392 AS node
+ARG PLAYWRIGHT_CACHE_IMAGE=empty-browser-cache
+FROM scratch AS empty-browser-cache
+COPY runtime-tools/browser-cache-placeholder.txt /opt/playwright/.cache-source
+# Optional trusted image cache. The locked Playwright package still selects its
+# required browser revision and downloads any missing revision.
+FROM ${PLAYWRIGHT_CACHE_IMAGE} AS browser-cache
+FROM node:22.23.4-bookworm-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d AS node
 FROM python:3.12-slim-bookworm@sha256:34386ef0cb081344d7ec1c103ba398e6e9f64e9ab3a1509accc92a4e24a07258
 ARG TARGETARCH
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
@@ -18,23 +24,35 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates ripgrep curl wget vim git jq unzip \
-      dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap \
+      dnsutils iputils-ping netcat-openbsd inetutils-telnet whois nmap openssh-client bubblewrap iptables util-linux libnss3-tools \
     && rm -rf /var/lib/apt/lists/*
 # Install exact tools and integrity-locked transitive dependencies at build time.
 COPY runtime-tools/package*.json /opt/artex-tools/
 ENV PATH="/opt/artex-tools/node_modules/.bin:${PATH}" \
     PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
-    NORMA_RIPGREP_NO_INSTALL=1
-RUN cd /opt/artex-tools && npm ci --omit=dev --ignore-scripts \
-    && playwright-cli --help \
-    && playwright install --with-deps chromium \
-    && rm -rf /var/lib/apt/lists/* /root/.npm
+    NORMA_RIPGREP_NO_INSTALL=1 \
+    NODE_PATH=/opt/artex-tools/node_modules \
+    CHROMIUM=/usr/local/bin/artex-chromium \
+    PLAYWRIGHT_MCP_EXECUTABLE_PATH=/usr/local/bin/artex-chromium \
+    PLAYWRIGHT_MCP_SANDBOX=true \
+    NO_UPDATE_NOTIFIER=1 \
+    NODE_USE_ENV_PROXY=1
+RUN --mount=type=cache,target=/root/.npm cd /opt/artex-tools \
+    && npm ci --omit=dev --ignore-scripts --prefer-offline --no-audit \
+    && playwright-cli --help
+RUN playwright install-deps chromium && rm -rf /var/lib/apt/lists/*
+COPY --from=browser-cache /opt/playwright/ /opt/playwright/
+RUN playwright install chromium \
+    && node -e 'require("fs").symlinkSync(require("playwright").chromium.executablePath(), "/usr/local/bin/artex-chromium")' \
+    && node -e 'console.log("Verified browser revision:", require("playwright").chromium.executablePath())'
 # Keep legacy npx invocations resolving to the same locked local packages.
 RUN mkdir -p /usr/local/lib/node_modules/@playwright \
     && ln -s /opt/artex-tools/node_modules/@playwright/mcp /usr/local/lib/node_modules/@playwright/mcp \
     && ln -s /opt/artex-tools/node_modules/@playwright/cli /usr/local/lib/node_modules/@playwright/cli \
     && ln -s /opt/artex-tools/node_modules/playwright /usr/local/lib/node_modules/playwright
 RUN groupadd --gid 10001 artex && useradd --uid 10001 --gid artex --create-home artex
+# Process inspection and cancellation are required by the shell tooling.
+RUN apt-get update && apt-get install -y --no-install-recommends procps && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY runtime-tools/package*.json /app/
 RUN ln -s /opt/artex-tools/node_modules /app/node_modules
@@ -44,6 +62,8 @@ COPY --chown=artex:artex dist/${TARGETARCH}/artex /app/artex
 # 它同时负责把 SIGTERM 转发给 artex —— docker stop 只把信号发给 PID 1，
 # 不转发的话 artex 收不到、做不了优雅关闭，10 秒后被 SIGKILL 硬杀。
 COPY start.sh /app/start.sh
+COPY runtime-tools/readiness.cjs runtime-tools/runner-entrypoint.sh /opt/artex-runtime/
+RUN chmod 755 /opt/artex-runtime/runner-entrypoint.sh
 RUN chmod +x /app/artex /app/start.sh
 COPY --chown=artex:artex skills/ /app/skills/
 RUN mkdir -p /app/data /app/auth && chown -R artex:artex /app

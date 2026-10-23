@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_USER: artex
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set the private database environment file}
+      POSTGRES_DB: artex
+    ports: ["127.0.0.1:5433:5432"]
+    volumes: ["artex-pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U artex -d artex"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+volumes:
+  artex-pgdata:

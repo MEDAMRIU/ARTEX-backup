@@ -1,0 +1,18 @@
+services:
+  fixture:
+    image: ${ARTEX_IMAGE:-artex-repair:20261022}
+    entrypoint: [python3, /fixture.py]
+    user: '10001:10001'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes: ['./fixture.py:/fixture.py:ro']
+    environment:
+      ARTEX_FIXTURE_MARKER: ${ARTEX_FIXTURE_MARKER:?set a fresh synthetic marker}
+    tmpfs: ['/tmp:size=16m,mode=1777']
+    networks:
+      runner_net:
+        ipv4_address: 172.30.97.4
+    pids_limit: 32
+    mem_limit: 128m
+    cpus: 0.5

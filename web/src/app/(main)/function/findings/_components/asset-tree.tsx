@@ -35,14 +35,14 @@ const KIND_ICON: Record<FindingAssetKind, LucideIcon> = {
 };
 
 const KIND_LABEL: Record<FindingAssetKind, string> = {
-  company: "企业",
-  root_domain: "根域名",
-  subdomain: "子域名",
+  company: "Organization",
+  root_domain: "Root domain",
+  subdomain: "Subdomain",
   ip: "IP",
-  app: "应用",
-  service: "服务",
-  endpoint: "接口",
-  none: "未关联",
+  app: "Application",
+  service: "Service",
+  endpoint: "API",
+  none: "Unlinked",
 };
 
 // TreeNode 是节点数组组装出来的树。后端已按「同父下发现多的在前」排好序,
@@ -234,9 +234,9 @@ export function AssetTree({
     [isExpanded],
   );
 
-  let emptyHint = "当前筛选下没有关联到资产的发现。";
-  if (loading) emptyHint = "加载中…";
-  else if (searching) emptyHint = "没有匹配的资产。";
+  let emptyHint = "No findings linked to assets match the current filters.";
+  if (loading) emptyHint = "Loading…";
+  else if (searching) emptyHint = "No matching assets.";
 
   const rows: React.ReactNode[] = [];
   const pushRows = (list: TreeNode[]) => {
@@ -265,8 +265,8 @@ export function AssetTree({
             type="search"
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
-            placeholder="过滤资产"
-            aria-label="过滤资产"
+            placeholder={"Filter assets"}
+            aria-label={"Filter assets"}
           />
           <InputGroupAddon>
             <SearchIcon aria-hidden="true" />
@@ -279,8 +279,8 @@ export function AssetTree({
             className="size-8 shrink-0 text-muted-foreground"
             onClick={onRefresh}
             disabled={loading}
-            aria-label="刷新资产树"
-            title="刷新资产树"
+            aria-label={"Refresh asset tree"}
+            title={"Refresh asset tree"}
           >
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} />
           </Button>
@@ -295,7 +295,7 @@ export function AssetTree({
           selected === null ? "bg-accent font-medium" : "hover:bg-accent/50",
         )}
       >
-        <span>全部资产</span>
+        <span>{"All assets"}</span>
         <span className="text-xs tabular-nums text-muted-foreground">{findingTotal}</span>
       </button>
 
@@ -308,8 +308,8 @@ export function AssetTree({
 
       {truncated && (
         <p className="px-1 text-xs text-muted-foreground">
-          资产过多，已隐藏{(droppedKinds ?? []).map((k) => KIND_LABEL[k as FindingAssetKind] ?? k).join(" / ")}
-          层级（计数仍已计入上层）。用筛选或过滤框收窄可看到完整层级。
+          {"Too many assets; hidden"}{(droppedKinds ?? []).map((k) => KIND_LABEL[k as FindingAssetKind] ?? k).join(" / ")}
+          {"levels (counts are included in parent levels). Narrow the results with filters or the search box to see the full hierarchy."}
         </p>
       )}
     </div>
@@ -344,7 +344,7 @@ function AssetTreeRow({
           type="button"
           onClick={onToggle}
           className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-          aria-label={open ? "折叠" : "展开"}
+          aria-label={open ? "Collapse" : "Expand"}
           aria-expanded={open}
         >
           <ChevronRightIcon className={cn("size-3.5 transition-transform", open && "rotate-90")} />
@@ -363,16 +363,16 @@ function AssetTreeRow({
       </button>
       <span className="flex shrink-0 items-center gap-1 text-xs tabular-nums">
         {node.critical > 0 && (
-          <span className="text-rose-600" title={`严重 ${node.critical}`}>
+          <span className="text-rose-600" title={`Critical ${node.critical}`}>
             {node.critical}
           </span>
         )}
         {node.high > 0 && (
-          <span className="text-red-500" title={`高危 ${node.high}`}>
+          <span className="text-red-500" title={`High ${node.high}`}>
             {node.high}
           </span>
         )}
-        <span className="text-muted-foreground" title={`共 ${node.total} 条发现`}>
+        <span className="text-muted-foreground" title={`Total ${node.total} findings`}>
           {node.total}
         </span>
       </span>

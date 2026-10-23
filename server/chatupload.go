@@ -57,12 +57,12 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 	case "staging":
 		sub = "drafts"
 	default:
-		writeErr(w, 400, "scope 必须是 task / session / staging")
+		writeErr(w, 400, "scope must be task / session / staging")
 		return
 	}
 	id := r.URL.Query().Get("id")
 	if !safeChatID.MatchString(id) {
-		writeErr(w, 400, "非法 id")
+		writeErr(w, 400, "Invalid id")
 		return
 	}
 	if taskScoped {
@@ -71,7 +71,7 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !s.engine.beginTaskOperation(id) {
-			writeErr(w, http.StatusConflict, "任务正在删除，无法上传附件")
+			writeErr(w, http.StatusConflict, "Task is being deleted; cannot upload attachments")
 			return
 		}
 		defer s.engine.decInflight(id)
@@ -83,18 +83,18 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 	defer root.Close()
 	dir := filepath.Join(sub, id, "uploads")
 	if err := root.MkdirAll(dir, 0o755); err != nil {
-		writeErr(w, 500, "建目录失败: "+err.Error())
+		writeErr(w, 500, "Failed to create directory: "+err.Error())
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxChatUpload)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		writeErr(w, 400, "解析上传失败或超出大小限制: "+err.Error())
+		writeErr(w, 400, "Failed to parse upload or size limit exceeded: "+err.Error())
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
 	files := r.MultipartForm.File["file"]
 	if len(files) == 0 {
-		writeErr(w, 400, "缺少上传文件(表单字段 file)")
+		writeErr(w, 400, "Missing uploaded file (form field file)")
 		return
 	}
 	out := make([]chatAttachment, 0, len(files))
@@ -105,7 +105,7 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		dest, err := saveUniqueUpload(root, hdr, dir, name)
 		if err != nil {
-			writeErr(w, 500, "保存失败: "+err.Error())
+			writeErr(w, 500, "Failed to save: "+err.Error())
 			return
 		}
 

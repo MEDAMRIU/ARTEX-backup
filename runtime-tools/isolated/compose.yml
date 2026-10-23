@@ -1,0 +1,64 @@
+# One immutable assessment per stack. Generate config and secrets outside the repo.
+# The app remains on its own control host/container and calls the loopback runner.
+services:
+  broker:
+    image: ${ARTEX_IMAGE:-artex-repair:20261022}
+    entrypoint: [/app/artex, runtime-egress, /config/broker.json]
+    user: '10001:10001'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ${ARTEX_RUN_DIR:?set ARTEX_RUN_DIR}/config:/config:ro
+      - ${ARTEX_RUN_DIR}/broker:/state
+    tmpfs: ['/tmp:size=32m,mode=1777']
+    networks:
+      runner_net:
+        ipv4_address: 172.30.97.2
+      outbound: {}
+    pids_limit: 128
+    mem_limit: 768m
+    cpus: 1
+  runner:
+    image: ${ARTEX_IMAGE:-artex-repair:20261022}
+    entrypoint: [/opt/artex-runtime/runner-entrypoint.sh, /config/runner.json]
+    user: root
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [NET_ADMIN, SETUID, SETGID, SETPCAP, CHOWN, DAC_OVERRIDE]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=../policy/browser-seccomp.json
+      # Allow the unprivileged worker to mount proc for its fresh PID namespace.
+      # No host /proc or /sys bind is exposed to tool children.
+      - systempaths=unconfined
+    environment:
+      ARTEX_BROKER_IP: 172.30.97.2
+      ARTEX_TOOL_UID: ${ARTEX_TOOL_UID:-10001}
+      ARTEX_TOOL_GID: ${ARTEX_TOOL_GID:-10001}
+    volumes:
+      - ${ARTEX_RUN_DIR}/config:/config:ro
+      - ${ARTEX_RUN_DIR}/secrets:/secrets:ro
+      - ${ARTEX_RUN_DIR}/data/tasks/${ARTEX_TASK_ID:-1}:/workspace
+    tmpfs: ['/tmp:size=512m,mode=1777', '/run:size=16m,mode=755']
+    ports: ['127.0.0.1:${ARTEX_RUNNER_PORT:-18880}:8080']
+    networks:
+      runner_net:
+        ipv4_address: 172.30.97.3
+      # Docker requires a routed attachment to publish the loopback control port.
+      # The runner installs OUTPUT DROP on every interface before dropping root;
+      # tool egress remains limited to the broker's exact IP and two ports.
+      outbound: {}
+    depends_on: [broker]
+    pids_limit: 512
+    mem_limit: 3g
+    shm_size: 256m
+    cpus: 2
+networks:
+  runner_net:
+    internal: true
+    ipam:
+      config: [{subnet: 172.30.97.0/24}]
+  outbound:
+    ipam:
+      config: [{subnet: 172.30.98.0/24}]

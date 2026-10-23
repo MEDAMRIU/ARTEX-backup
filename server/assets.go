@@ -23,7 +23,7 @@ func decodeCompanyMutationRequest(w http.ResponseWriter, r *http.Request, value 
 	if err := json.NewDecoder(r.Body).Decode(value); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeErr(w, http.StatusRequestEntityTooLarge, "请求正文过大")
+			writeErr(w, http.StatusRequestEntityTooLarge, "Request body too large")
 		} else {
 			writeErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		}
@@ -118,7 +118,7 @@ func (s *Server) createCompany(w http.ResponseWriter, r *http.Request) {
 	id, added, skipped, invalid, scopeErrs, err := cs.CreateCompanyWithScope(req.Name, req.Logo, req.Scope, "api")
 	if err != nil {
 		if errors.Is(err, db.ErrCompanyNameConflict) {
-			writeErr(w, http.StatusConflict, "企业名称已存在")
+			writeErr(w, http.StatusConflict, "Organization name already exists")
 			return
 		}
 		var validationErr *db.CompanyScopeValidationError

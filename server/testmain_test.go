@@ -13,6 +13,8 @@ import (
 // server test suite so cross-package DELETE cleanup races with db/agent
 // packages are avoided when running `go test ./...`.
 func TestMain(m *testing.M) {
+	// Legacy application tests exercise local fake tools; production defaults to no execution.
+	_ = os.Setenv("ARTEX_EXECUTION_MODE", "local")
 	dsn, _, err := db.DSN()
 	if err != nil {
 		os.Exit(m.Run())

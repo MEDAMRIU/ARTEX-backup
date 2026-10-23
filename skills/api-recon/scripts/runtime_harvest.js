@@ -32,7 +32,6 @@
  *   "waitMs": 1200, "perRouteMs": 900, "headless": true
  * }
  */
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const fs = require('fs');
 const path = require('path');
 
@@ -83,6 +82,12 @@ function neutralize(txt, n) {
 
 (async () => {
   const cfg = loadCfg(process.argv[2] || 'config.json');
+  // Node reads proxy settings at startup. Re-exec once when config changes them.
+  if (cfg.proxy && (process.env.HTTPS_PROXY !== cfg.proxy || process.env.NODE_USE_ENV_PROXY !== '1')) {
+    const { spawnSync } = require('child_process');
+    const child = spawnSync(process.execPath, process.argv.slice(1), { stdio: 'inherit', env: { ...process.env, HTTP_PROXY: cfg.proxy, HTTPS_PROXY: cfg.proxy, NODE_USE_ENV_PROXY: '1' } });
+    process.exit(child.status ?? 1);
+  }
   const origin = new URL(cfg.baseUrl).origin;
   const host = new URL(cfg.baseUrl).hostname;
   const rec = [];           // {m,u,b,resp,ct}
@@ -94,7 +99,11 @@ function neutralize(txt, n) {
     process.env.HTTP_PROXY = cfg.proxy;
     process.env.HTTPS_PROXY = cfg.proxy;
   }
-  const launchArgs = ['--no-sandbox', '--disable-dev-shm-usage', '--ignore-certificate-errors'];
+  const launchArgs = ['--disable-dev-shm-usage'];
+  // The default must retain the browser sandbox and certificate verification.
+  // Explicit opt-ins are only for an isolated, controlled lab.
+  if (cfg.noSandbox === true) launchArgs.push('--no-sandbox');
+  if (cfg.ignoreHTTPSErrors === true) launchArgs.push('--ignore-certificate-errors');
   if (cfg.proxy) launchArgs.push(`--proxy-server=${cfg.proxy}`);
   const browser = await puppeteer.launch({
     executablePath: cfg.chromium, headless: cfg.headless ? 'new' : false,

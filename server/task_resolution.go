@@ -19,7 +19,7 @@ type taskLLMResolution struct {
 
 func (s *Server) resolutionFromProfile(p *db.LLMProfile, source string) taskLLMResolution {
 	if p == nil {
-		return taskLLMResolution{Source: source, Reason: "LLM 配置不存在"}
+		return taskLLMResolution{Source: source, Reason: "LLM configuration does not exist"}
 	}
 	id := p.ID
 	result := taskLLMResolution{

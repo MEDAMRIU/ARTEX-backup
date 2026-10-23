@@ -48,7 +48,7 @@ func (s *Server) wsRel(name string) string {
 func (s *Server) wsRoot(w http.ResponseWriter) *os.Root {
 	root, err := os.OpenRoot(s.m.dir)
 	if err != nil {
-		writeErr(w, 500, "工作区不可用")
+		writeErr(w, 500, "Workspace unavailable")
 		return nil
 	}
 	return root
@@ -71,16 +71,16 @@ func (s *Server) wsList(w http.ResponseWriter, r *http.Request) {
 	defer root.Close()
 	rel, ok := s.wsResolve(r.URL.Query().Get("path"))
 	if !ok {
-		writeErr(w, 400, "非法路径")
+		writeErr(w, 400, "Invalid path")
 		return
 	}
 	fi, err := root.Stat(rel)
 	if err != nil {
-		writeErr(w, 404, "路径不存在")
+		writeErr(w, 404, "Path does not exist")
 		return
 	}
 	if !fi.IsDir() {
-		writeErr(w, 400, "不是目录")
+		writeErr(w, 400, "Not a directory")
 		return
 	}
 	ents, err := fs.ReadDir(root.FS(), filepath.ToSlash(rel))
@@ -122,23 +122,23 @@ func (s *Server) wsRead(w http.ResponseWriter, r *http.Request) {
 	defer root.Close()
 	rel, ok := s.wsResolve(r.URL.Query().Get("path"))
 	if !ok {
-		writeErr(w, 400, "非法路径")
+		writeErr(w, 400, "Invalid path")
 		return
 	}
 	f, err := root.Open(rel)
 	if err != nil {
-		writeErr(w, 404, "文件不存在")
+		writeErr(w, 404, "File does not exist")
 		return
 	}
 	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil || !fi.Mode().IsRegular() {
-		writeErr(w, 400, "不是普通文件")
+		writeErr(w, 400, "Not a regular file")
 		return
 	}
 	data, err := io.ReadAll(io.LimitReader(f, maxWorkspaceRead+1))
 	if err != nil {
-		writeErr(w, 500, "读取失败")
+		writeErr(w, 500, "Failed to read")
 		return
 	}
 	if len(data) > maxWorkspaceRead {
@@ -169,11 +169,11 @@ func (s *Server) wsWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	rel, ok := s.wsResolve(req.Path)
 	if !ok || rel == "." {
-		writeErr(w, 400, "非法路径")
+		writeErr(w, 400, "Invalid path")
 		return
 	}
 	if fi, err := root.Stat(rel); err == nil && fi.IsDir() {
-		writeErr(w, 400, "目标是目录")
+		writeErr(w, 400, "Target is a directory")
 		return
 	}
 	if err := root.MkdirAll(filepath.Dir(rel), 0o755); err != nil {
@@ -203,7 +203,7 @@ func (s *Server) wsMkdir(w http.ResponseWriter, r *http.Request) {
 	}
 	rel, ok := s.wsResolve(req.Path)
 	if !ok || rel == "." {
-		writeErr(w, 400, "非法路径")
+		writeErr(w, 400, "Invalid path")
 		return
 	}
 	if err := root.MkdirAll(rel, 0o755); err != nil {
@@ -223,15 +223,15 @@ func (s *Server) wsDelete(w http.ResponseWriter, r *http.Request) {
 	defer root.Close()
 	rel, ok := s.wsResolve(r.URL.Query().Get("path"))
 	if !ok {
-		writeErr(w, 400, "非法路径")
+		writeErr(w, 400, "Invalid path")
 		return
 	}
 	if rel == "." {
-		writeErr(w, 400, "不能删除工作区根目录")
+		writeErr(w, 400, "Cannot delete the workspace root directory")
 		return
 	}
 	if _, err := root.Lstat(rel); err != nil {
-		writeErr(w, 404, "路径不存在")
+		writeErr(w, 404, "Path does not exist")
 		return
 	}
 	if err := root.RemoveAll(rel); err != nil {
@@ -250,18 +250,18 @@ func (s *Server) wsDownload(w http.ResponseWriter, r *http.Request) {
 	defer root.Close()
 	rel, ok := s.wsResolve(r.URL.Query().Get("path"))
 	if !ok {
-		writeErr(w, 400, "非法路径")
+		writeErr(w, 400, "Invalid path")
 		return
 	}
 	f, err := root.Open(rel)
 	if err != nil {
-		writeErr(w, 404, "文件不存在")
+		writeErr(w, 404, "File does not exist")
 		return
 	}
 	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil || !fi.Mode().IsRegular() {
-		writeErr(w, 404, "文件不存在")
+		writeErr(w, 404, "File does not exist")
 		return
 	}
 	name := filepath.Base(rel)
@@ -279,22 +279,22 @@ func (s *Server) wsUpload(w http.ResponseWriter, r *http.Request) {
 	defer root.Close()
 	dirRel, ok := s.wsResolve(r.URL.Query().Get("path"))
 	if !ok {
-		writeErr(w, 400, "非法路径")
+		writeErr(w, 400, "Invalid path")
 		return
 	}
 	if fi, err := root.Stat(dirRel); err != nil || !fi.IsDir() {
-		writeErr(w, 400, "目标目录不存在")
+		writeErr(w, 400, "Target directory does not exist")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxWorkspaceUpload)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		writeErr(w, 400, "解析上传失败或超出大小限制："+err.Error())
+		writeErr(w, 400, "Failed to parse upload or size limit exceeded:"+err.Error())
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
 	files := r.MultipartForm.File["file"]
 	if len(files) == 0 {
-		writeErr(w, 400, "缺少上传文件(表单字段 file)")
+		writeErr(w, 400, "Missing uploaded file (form field file)")
 		return
 	}
 	saved := 0
