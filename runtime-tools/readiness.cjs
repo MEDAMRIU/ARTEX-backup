@@ -18,6 +18,8 @@ function get(url, path) {return new Promise((resolve,reject)=>{
 });}
 (async()=>{
  await check('filesystem_and_process_isolation',async()=>{
+  const alias=process.env.ARTEX_HOST_WORKSPACE;
+  if(alias && (fs.realpathSync(alias)!=='/workspace'||fs.statSync(alias).ino!==fs.statSync('/workspace').ino))throw Error('App-style task paths do not map to the persistent workspace');
   for(const p of ['/app/auth','/app/data','/run/artex-control-canary','/run/secrets','/var/run/docker.sock']) if(fs.existsSync(p))throw Error('Control path visible: '+p);
   for(const pid of fs.readdirSync('/proc').filter(x=>/^\d+$/.test(x))) {
    let env='';try{env=fs.readFileSync('/proc/'+pid+'/environ','utf8');}catch{}

@@ -24,6 +24,7 @@ type RunnerConfig struct {
 	Listen             string    `json:"listen"`
 	TaskID             string    `json:"task_id"`
 	Workspace          string    `json:"workspace"`
+	HostWorkspace      string    `json:"host_workspace,omitempty"`
 	TokenFile          string    `json:"token_file"`
 	ProxyURL           string    `json:"proxy_url"`
 	BrokerAPI          string    `json:"broker_api"`
@@ -73,6 +74,9 @@ func NewRunner(cfg RunnerConfig) (*Runner, error) {
 	}
 	if !validID(cfg.TaskID) || !filepath.IsAbs(cfg.Workspace) || cfg.ExpiresAt.IsZero() || cfg.ProxyURL == "" || cfg.BrokerAPI == "" || cfg.DeniedProbeAddress == "" {
 		return nil, errors.New("incomplete isolated runner configuration")
+	}
+	if err := validateWorkspaceAlias(cfg.TaskID, cfg.HostWorkspace); err != nil {
+		return nil, err
 	}
 	if !strings.HasSuffix(cfg.Listen, ":8080") {
 		return nil, errors.New("runner control port must be 8080 for the firewall policy")
@@ -247,6 +251,9 @@ func (r *Runner) session(directory string) (*sandboxSession, error) {
 		}
 	}
 	args = append(args, "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/run", "--dir", "/etc", "--dir", "/home", "--bind", r.cfg.Workspace, "/workspace")
+	// SDK prompts contain app-side absolute paths. Map only this task's path
+	// onto the existing workspace bind; no app directory is exposed to tools.
+	args = append(args, workspaceAliasArgs(r.cfg.HostWorkspace)...)
 	for _, file := range []string{"/etc/passwd", "/etc/group", "/etc/nsswitch.conf", "/etc/resolv.conf", "/etc/ld.so.cache", "/etc/ssl/certs", "/etc/fonts"} {
 		if _, e := os.Stat(file); e == nil {
 			args = append(args, "--ro-bind", file, file)
@@ -263,6 +270,7 @@ func (r *Runner) session(directory string) (*sandboxSession, error) {
 		"HTTP_PROXY": r.cfg.ProxyURL, "HTTPS_PROXY": r.cfg.ProxyURL, "http_proxy": r.cfg.ProxyURL, "https_proxy": r.cfg.ProxyURL, "NO_PROXY": noProxy, "no_proxy": noProxy,
 		"NODE_USE_ENV_PROXY": "1", "NODE_EXTRA_CA_CERTS": "/etc/artex-egress-ca.pem", "CURL_CA_BUNDLE": "/etc/artex-egress-ca.pem", "SSL_CERT_FILE": "/etc/artex-egress-ca.pem", "REQUESTS_CA_BUNDLE": "/etc/artex-egress-ca.pem",
 		"ARTEX_BROKER_API": r.cfg.BrokerAPI, "ARTEX_DENIED_PROBE_ADDRESS": r.cfg.DeniedProbeAddress, "ARTEX_TASK_ID": r.cfg.TaskID,
+		"ARTEX_HOST_WORKSPACE": r.cfg.HostWorkspace,
 	}
 	for key, value := range environment {
 		args = append(args, "--setenv", key, value)

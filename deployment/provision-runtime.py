@@ -90,6 +90,7 @@ def main():
     save(state / 'config/broker.json', {'state': '/state', 'policy_file': '/config/policy.json',
          'proxy_listen': ':3128', 'api_listen': ':8081', 'canary_listen': ':3130'}, 0o644)
     save(state / 'config/runner.json', {'listen': ':8080', 'task_id': task, 'workspace': '/workspace',
+         'host_workspace': str(workspace),
          'token_file': '/secrets/runner-token', 'proxy_url': f'http://{broker}:3128',
          'broker_api': f'http://{broker}:8081', 'ca_file': '/run/artex-public/ca.pem',
          'denied_probe_address': f'{broker}:3130', 'expires_at': policy['expires_at']}, 0o644)

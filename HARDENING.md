@@ -643,3 +643,22 @@ no signup/login/form submission/bypass, and stop at the authentication wall. Its
 22-request negative therefore does not measure authenticated assessment capability
 or establish a model refusal. The repair validation uses the private owned fixture;
 no new real-target traffic is part of this repair batch.
+
+The live DeepSeek fixture assessment completed as task3 (3/3 goals, one seeded
+IDOR with authenticated200/91-byte reads and401/403/404 controls). Browser-created
+pause/provision/Resume and report display/export passed. The original task2 report
+also reappears in export after51byte-identical evidence files were recovered.
+
+The fixture run exposed a further path mismatch: SDK prompts show app absolute
+task paths, while tools originally saw only `/workspace`. A worker could create
+an ephemeral copy of that directory inside its namespace. New runners accept a
+validated `host_workspace` alias for only their own `tasks/<id>` path: empty parent
+directories plus a symlink to the existing `/workspace` bind, without another host
+mount. Readiness verifies both paths resolve to the same inode. This keeps raw
+evidence written through either spelling in the persistent task subtree.
+
+Provisioning handles connection resets during startup. `--finish-existing` can
+finish an unpublished registration using exactly its saved configuration, token,
+fixture marker and budget; changed arguments are rejected. No deadline/counter
+reset or published-task reuse is allowed. Native app deployment and image/alias
+acceptance evidence are recorded in the owner OPS log.
