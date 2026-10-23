@@ -28,6 +28,8 @@ def main():
     parser.add_argument('--runtime-root', type=Path, default=Path('/var/lib/artex/runtime'))
     parser.add_argument('--registry', type=Path, default=Path('/etc/artex/runners'))
     parser.add_argument('--fixture', action='store_true', help='Add the private synthetic fixture')
+    parser.add_argument('--finish-existing', action='store_true',
+                        help='Finish an unpublished registration using its unchanged existing state')
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error('Run as the host operator, not inside the application')
@@ -53,21 +55,32 @@ def main():
     uid, gid = pwd.getpwnam('artex').pw_uid, grp.getgrnam('artex').gr_gid
     state = args.runtime_root / ('task-' + task)
     registration = args.registry / (task + '.json')
-    if state.exists() or registration.exists():
+    if registration.exists() or (state.exists() and not args.finish_existing):
         parser.error('Task already provisioned; create a new task instead of resetting its budget')
+    if args.finish_existing and not state.is_dir():
+        parser.error('No existing provisioning state to finish')
     workspace = args.workspace_root / 'tasks' / task
     workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
     if workspace.resolve() != workspace.absolute():
         parser.error('Task workspace must not contain symlink components')
     os.chown(workspace, uid, gid)
-    state.mkdir(parents=True, mode=0o700)
-    os.chmod(state, 0o700)
-    for name in ['config', 'broker', 'secrets']:
-        (state / name).mkdir(mode=0o755 if name == 'config' else 0o700)
-    os.chown(state / 'broker', uid, gid)
-    token = secrets.token_urlsafe(48)
+    if not args.finish_existing:
+        state.mkdir(parents=True, mode=0o700)
+        os.chmod(state, 0o700)
+        for name in ['config', 'broker', 'secrets']:
+            (state / name).mkdir(mode=0o755 if name == 'config' else 0o700)
+        os.chown(state / 'broker', uid, gid)
+    token = ((state / 'secrets/runner-token').read_text().strip() if args.finish_existing
+             else secrets.token_urlsafe(48))
 
     def save(path, value, mode=0o600):
+        protected = path.parent in [state / 'config', state / 'secrets'] or path == state / 'compose.env'
+        if args.finish_existing and protected:
+            old = path.read_text()
+            matches = json.loads(old) == value if isinstance(value, dict) else old == value
+            if not matches:
+                raise SystemExit('Existing runtime differs from requested configuration; no state was reset')
+            return
         path.write_text(value if isinstance(value, str) else json.dumps(value, indent=2))
         path.chmod(mode)
 
@@ -86,7 +99,11 @@ def main():
            'ARTEX_RUNNER_IP': f'172.30.{args.slot}.3', 'ARTEX_FIXTURE_IP': f'172.30.{args.slot}.4',
            'ARTEX_RUNNER_SUBNET': f'172.30.{args.slot}.0/24', 'ARTEX_OUTBOUND_SUBNET': f'172.31.{args.slot}.0/24'}
     if args.fixture:
-        env['ARTEX_FIXTURE_MARKER'] = secrets.token_urlsafe(24)
+        if args.finish_existing:
+            existing_env = dict(line.split('=', 1) for line in (state / 'compose.env').read_text().splitlines())
+            env['ARTEX_FIXTURE_MARKER'] = existing_env['ARTEX_FIXTURE_MARKER']
+        else:
+            env['ARTEX_FIXTURE_MARKER'] = secrets.token_urlsafe(24)
     save(state / 'compose.env', ''.join(f'{k}={v}\n' for k, v in env.items()))
     repo = Path(__file__).resolve().parent.parent
     command = ['docker', 'compose', '--project-name', 'artex-task-' + task,
@@ -104,7 +121,9 @@ def main():
             with urllib.request.urlopen(request, timeout=110) as response:
                 readiness = json.load(response)
             break
-        except urllib.error.URLError:
+        except urllib.error.HTTPError:
+            raise
+        except (urllib.error.URLError, ConnectionError, TimeoutError):
             if attempt == 11:
                 raise
             time.sleep(1)
