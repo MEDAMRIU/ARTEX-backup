@@ -523,11 +523,13 @@ Deployment and acceptance on dedicated Linveo `50.114.206.253`:
 - Origin `http://127.0.0.1:8787/login` returns 200 with zero Han characters and
   the English title `ARTEX — Autonomous penetration testing console`; API
   remains behind auth. Port 8788 is the traffic-recording proxy, not the web UI.
-- Public reachability is not established. On 23 October at 17:06 UTC,
+- Public access is intentionally SSH-tunnel-only. On 23 October at 17:06 UTC,
   `https://artx.xyz/login` resolved to `34.102.221.37` (Google) and reset the
   TLS connection; HTTP also returned an empty reply. The Linveo host has no
-  public listener except SSH/22, and this session did not change DNS or an
-  external edge. The owner must confirm whether public access is intended.
+  public listener except SSH/22. The owner decided on 23 October to keep the app
+  loopback-only and not change DNS or an external edge. Use
+  `ssh -N -L 18787:127.0.0.1:8787 -i ~/.ssh/rifi_winblue root@50.114.206.253`
+  and open `http://127.0.0.1:18787/login`.
 - Fresh image `artex-candidate:20261023`
   (`sha256:db583eaeea796f45f9c11dc55bc4e86f9aac1992549fb1213f2a771a2708d01a`)
   passed 25/25 independent acceptance checks on isolated task 2. Evidence:
