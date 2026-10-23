@@ -547,3 +547,30 @@ Deployment and acceptance on dedicated Linveo `50.114.206.253`:
 Residual English strings are non-visible compatibility data: legacy mention
 aliases, the old task-file marker fallback, and third-party `@antv/g6` strings
 in the static chunk. Visible HTML had zero Han characters.
+
+### Second blind baseline — zusott.com — 23 October 2026
+
+The owner supplied `https://zusott.com/dashboard` as the second blind target.
+Task 2 ran from 21:05:34 to 21:09:36 UTC with read-only constraints. The broker
+policy pinned `zusott.com` (Cloudflare addresses), allowed HTTPS/443 only,
+capped HTTP at 80, allowed 0 TCP connections, and enforced 1.5 s pacing.
+
+Result: 22 HTTP GET requests (21 × 200, 1 × 307), 0 TCP connections, minimum
+adjacent initiation interval 1.8001 s, and 0 confirmed vulnerabilities.
+`GET /dashboard` returned 307 with `Location: /sign-in?callbackUrl=%2Fdashboard`
+and a 33-byte body. The sign-in page returned 200 with 11,408 bytes and a Next.js
+stack. The worker fetched 17 same-host assets and three GET-only public config
+endpoints: reCAPTCHA disabled, SSO `{"google":true}`, and no SSO providers. CSP
+and header observations are configuration notes, not exploited issues. No login,
+bypass, registration, POST, form, upload, write or off-host target request was
+performed. The unauthenticated surface exposed no dashboard data.
+
+Evidence is outside the repository at
+`~/.local/share/artex-blind-20261023`: `i10/report.md` (worker report),
+`report-export.md`, `task-2.json`, `intents.json`, `goals.json`, `egress.jsonl`
+and `budget.sqlite`. The app was temporarily bound to runner task 2 on port
+18881; after the run it was restored to task 1 on 18880 and the blind stack was
+stopped, with the workspace and evidence retained. The built-in report export
+remains generic and includes activity errors; the worker report is the primary
+result. This run does not certify the target as secure and does not cover
+authenticated functionality.
