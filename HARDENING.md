@@ -491,3 +491,51 @@ trash and suppression working files are excluded from the new restore archive.
 The final image has now built and the isolated local runner/broker/fixture stack starts. The packaged runner checks exposed Docker control-port routing and nested proc-mount settings; compose was adjusted locally. Browser trust setup then exposed NSS rejecting the broker's Ed25519 CA, while an ECDSA P-256 comparison imports successfully. Certificate compatibility repair and full acceptance remain pending. Earlier download-pending language above is superseded; the foundation is not yet accepted. No further external target traffic was sent.
 
 The Winblue runtime backup is verified off-host at `~/.rifi-ops/SERVERS/WINBLUE_50.114.206.253/backup/runtime-2026-10-22`: 1.14GB archive, matching SHA256, full archive read, separate review and both database restores passed. Full application boot restore was not rehearsed. No Winblue reinstall or ARTEX deployment was performed. All source changes remain local and uncommitted/unpushed.
+
+### English release and host hardening — 23 October 2026
+
+The earlier "local/uncommitted" state is superseded. Commit
+`6eb09cae75798d0a354bedb3d1e747d5b74957ee` (`feat: ship English console and
+isolated runner hardening`) is pushed on `feat/chatgpt-sign-in`; the working tree
+was clean at handoff. The commit contains 194 changed files (+9558/-3871),
+including the English console, runner isolation, network budgets and tests.
+
+Verification on the final source:
+
+- `go test -p 1 ./... -count=1` passed against fresh disposable PostgreSQL
+  database `artex_english_test`. Serial execution is required: the same suite
+  without `-p 1` races on the shared test DB in company-attribution and profile
+  tests. `go vet ./...` passed.
+- Web static build passed; `node --test src/lib/chat-mentions.test.mjs
+  src/lib/activity-merge.test.mjs` passed 8/8. Biome `npm run check` still
+  reports 174 errors and 136 warnings across 135 files, mostly pre-existing
+  formatting debt; it was not auto-formatted.
+- Linux amd64 binary built with `CGO_ENABLED=0 GOOS=linux GOARCH=amd64`,
+  `-tags embedui`, `-trimpath`, `-ldflags '-s -w'`; sha256
+  `e90bf102c3bf5618de0a24fa3d73e4c2ad46519994a973d5ae2569f8175b2dc8`.
+  Release tarball sha256
+  `9a41985ebaf4961a2d0209061f0f0635fe956193e00b5638cbbf40f52753603c`.
+
+Deployment and acceptance on dedicated Linveo `50.114.206.253`:
+
+- `/opt/artex/current -> /opt/artex/releases/20261023-english`; service
+  `artex` active. Rollback release: `/opt/artex/releases/20261022-candidate`.
+- `/login` returns 200 with zero Han characters and the English title
+  `ARTEX — Autonomous penetration testing console`; API remains behind auth.
+- Fresh image `artex-candidate:20261023`
+  (`sha256:db583eaeea796f45f9c11dc55bc4e86f9aac1992549fb1213f2a771a2708d01a`)
+  passed 25/25 independent acceptance checks on isolated task 2. Evidence:
+  `~/.local/share/artex-deploy-20261023/vps-acceptance-english.json`.
+  The acceptance stack was removed after the run.
+- UFW is active with default deny incoming/allow outgoing, and only `22/tcp`
+  is allowed (v4 and v6). fail2ban is active with the `sshd` jail and no
+  current bans. SSH and the loopback app/proxy were rechecked. `x11forwarding`
+  remains enabled because it was outside the owner's UFW+fail2ban approval.
+- The restored task-1 runner stack on port 18880 is running, but readiness is
+  false: task 1's time budget is exhausted and the broker reports a
+  policy/task/time mismatch. It must not be represented as a ready runner or
+  used for a new assessment without provisioning a fresh task.
+
+Residual English strings are non-visible compatibility data: legacy mention
+aliases, the old task-file marker fallback, and third-party `@antv/g6` strings
+in the static chunk. Visible HTML had zero Han characters.
