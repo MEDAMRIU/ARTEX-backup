@@ -662,3 +662,57 @@ finish an unpublished registration using exactly its saved configuration, token,
 fixture marker and budget; changed arguments are rejected. No deadline/counter
 reset or published-task reuse is allowed. Native app deployment and image/alias
 acceptance evidence are recorded in the owner OPS log.
+
+
+### Deployed acceptance — 2026-10-23 21:56:34 UTC
+
+Application source `9b7e141ac6252c0e3206d9f2132bdc8441c6d611` is pushed and
+running at `/opt/artex/releases/20261023-runtime-reports-alias` on the dedicated
+Linveo host. Native binary SHA-256 is
+`0acf50a761efed810d6629168679e53cda2ab2f9d7be68f1592f12f62b671419`.
+New runtime image `artex-candidate:20261023-paths` has Docker image ID
+`sha256:69138ffa2f63b13d8cce3f01dca5caf94d977da2f5b0444bb1c0d259295c6704`.
+The image ID is the inspected manifest-list digest, not BuildKit's config digest.
+Deployment and rollback records, prior environment/release, and pre-change database
+dump are retained under `/root/backups/20261023-213544-artex-runtime-reports`.
+No public access change: app, database and runner ports remain loopback-only;
+UFW permits only SSH. The owner tunnel remains available on localhost:18787.
+
+A fresh Linux diagnostic (operator-only ID 900000001, no assessment/database task)
+passed all seven readiness checks. Absolute Bash and SDK Write/Read paths persisted
+through the own-task alias; authenticated downloads returned the same 21-byte and
+19-byte files. Control files and sibling task paths stayed inaccessible; scoped
+HTTPS worked. An independent read-only reviewer reproduced the live metadata,
+file hashes, report delivery and model-profile checks with no material gap.
+The diagnostic and expired legacy task-1 containers were stopped, not removed;
+the completed task-3 stack, database, evidence and all configuration remain.
+
+Task 3 used 31 actual `deepseek-flash` calls and 27 broker-counted HTTP requests,
+with zero TCP connections to the private synthetic fixture. Its three goals are
+met and one seeded high-severity IDOR is registered with workflow status `pending`.
+The real authenticated cross-user read returned 200/91 bytes, with 401, 403 and
+404 controls. This demonstrates this bounded fixture flow; it is not a new Zusott
+finding or proof of broad authenticated coverage. The raw 72-file recovery was
+an operator copy from the same worker namespace, with zero new target requests;
+its provenance and hashes are in task 3's `operator-evidence-recovery.json`.
+The reviewer independently matched all 72 files. Future runners use the permanent
+alias repair instead of that recovery step.
+
+Final authenticated API readback shows task 3 done, 3/3 goals, no in-flight work,
+and main/planner/worker all resolving profile 2 (`deepseek-flash`). The complete
+8,571-byte worker report has SHA-256
+`4b82c6e76114bebe7623f2a94a63c017cda3ea8de6d61360b1729279375493ba` and is
+byte-identical across disk, API and the actual browser download; it appears inside
+the 29,695-byte final export. Task 2's recovered export is 17,096 bytes. Private
+receipts, browser observations, reports and test logs are saved under
+`~/.local/share/artex-repair-20261023`. Full serial Go tests and final execution,
+agent and server race suites passed. Browser session was closed after verification.
+
+Owner acceptance remains pending: open
+`http://127.0.0.1:18787/function/tasks/detail/?id=3`, select Report, and download
+`tasks/3/i17/final-report.md`; expect the seeded IDOR, its denial controls and
+linked evidence. New tasks still need an explicit approved scope and operator
+runner provisioning before Resume; exhausted policies are never auto-renewed.
+The Zusott auth-wall exclusions were in the operator-written task instructions,
+not evidence that the model refused an authenticated test. CRM: no stored website
+value changed. Site Manager: no managed website or redirect changed.
