@@ -520,8 +520,14 @@ Deployment and acceptance on dedicated Linveo `50.114.206.253`:
 
 - `/opt/artex/current -> /opt/artex/releases/20261023-english`; service
   `artex` active. Rollback release: `/opt/artex/releases/20261022-candidate`.
-- `/login` returns 200 with zero Han characters and the English title
-  `ARTEX — Autonomous penetration testing console`; API remains behind auth.
+- Origin `http://127.0.0.1:8787/login` returns 200 with zero Han characters and
+  the English title `ARTEX — Autonomous penetration testing console`; API
+  remains behind auth. Port 8788 is the traffic-recording proxy, not the web UI.
+- Public reachability is not established. On 23 October at 17:06 UTC,
+  `https://artx.xyz/login` resolved to `34.102.221.37` (Google) and reset the
+  TLS connection; HTTP also returned an empty reply. The Linveo host has no
+  public listener except SSH/22, and this session did not change DNS or an
+  external edge. The owner must confirm whether public access is intended.
 - Fresh image `artex-candidate:20261023`
   (`sha256:db583eaeea796f45f9c11dc55bc4e86f9aac1992549fb1213f2a771a2708d01a`)
   passed 25/25 independent acceptance checks on isolated task 2. Evidence:
