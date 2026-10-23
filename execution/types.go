@@ -56,6 +56,11 @@ type Reply struct {
 }
 
 type Client struct {
+	registryMu      sync.Mutex
+	registryDir     string
+	dataDir         string
+	clients         map[string]*Client
+	ConfigureChild  func(*Client)
 	mu              sync.RWMutex
 	readiness       Readiness
 	failure         string
@@ -78,6 +83,16 @@ func NewClientFromEnv(workspace string) (*Client, error) {
 	}
 	if mode != "isolated" {
 		return nil, fmt.Errorf("ARTEX_EXECUTION_MODE must be isolated or explicit trusted local")
+	}
+	if registry := os.Getenv("ARTEX_RUNNER_REGISTRY"); registry != "" {
+		if !filepath.IsAbs(registry) {
+			return nil, fmt.Errorf("ARTEX_RUNNER_REGISTRY must be an absolute operator-owned directory")
+		}
+		info, err := os.Lstat(registry)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("ARTEX_RUNNER_REGISTRY must be a regular directory")
+		}
+		return &Client{registryDir: registry, dataDir: workspace, clients: map[string]*Client{}}, nil
 	}
 	base := strings.TrimRight(os.Getenv("ARTEX_RUNNER_URL"), "/")
 	parsed, err := url.Parse(base)
@@ -144,6 +159,21 @@ func (c *Client) Readiness(ctx context.Context, refresh bool) (Readiness, error)
 	return r, err
 }
 func (c *Client) Call(ctx context.Context, name string, input json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
+	if c.registryDir != "" {
+		if tc == nil {
+			return actool.Errorf("isolated runner requires an attributed workspace"), nil
+		}
+		rel, err := filepath.Rel(filepath.Join(c.dataDir, "tasks"), tc.WorkingDir)
+		if err != nil || !filepath.IsLocal(rel) {
+			return actool.Errorf("This workspace has no isolated runner."), nil
+		}
+		task := strings.Split(filepath.ToSlash(rel), "/")[0]
+		child, err := c.ForTask(task)
+		if err != nil {
+			return actool.Errorf(err.Error()), nil
+		}
+		return child.Call(ctx, name, input, tc)
+	}
 	if c.BaseURL == "" {
 		return actool.Errorf("Tool execution is disabled until an isolated runner is configured."), nil
 	}
@@ -202,9 +232,13 @@ func (r *Readiness) ValidateRequired() {
 }
 
 func (c *Client) ReadyFor(task string) bool {
+	if c.registryDir != "" {
+		child, err := c.ForTask(task)
+		return err == nil && child.ReadyFor(task)
+	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return task == c.TaskID && c.readiness.Ready && time.Now().Before(c.readiness.ExpiresAt.Add(time.Minute))
+	return task == c.TaskID && c.readiness.Ready && time.Now().Before(c.readiness.ExpiresAt)
 }
 
 func (c *Client) Fail(detail string) {

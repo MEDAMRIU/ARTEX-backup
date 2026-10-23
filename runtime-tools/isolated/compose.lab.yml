@@ -12,7 +12,7 @@ services:
     tmpfs: ['/tmp:size=16m,mode=1777']
     networks:
       runner_net:
-        ipv4_address: 172.30.97.4
+        ipv4_address: ${ARTEX_FIXTURE_IP:-172.30.97.4}
     pids_limit: 32
     mem_limit: 128m
     cpus: 0.5

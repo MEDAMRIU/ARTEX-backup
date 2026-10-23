@@ -285,6 +285,18 @@ func (s *Server) restoreTaskRuntimes() {
 	// restore persisted paused state (so a task paused before restart stays paused).
 	for _, t := range m.LoadExisting() {
 		lifecycle := t.lifecycleSnapshot()
+		if !lifecycle.Paused && !isTerminalStatus(lifecycle.Status) {
+			if err := s.restoreRuntime(t.ID); err != nil {
+				// Startup has not reset/restored all other tasks yet. Install and
+				// persist this pause without launching scheduler reconciliation.
+				s.engine.Pause(t.ID, agent.Causef("runtime_not_ready", "task runtime unavailable after restart", "%s", err))
+				if pauseErr := m.ApplyTaskPause(t.ID); pauseErr != nil {
+					log.Printf("[runtime] task %s startup pause persistence: %v", t.ID, pauseErr)
+				}
+				s.engine.emitActivity(t, db.Activity{Worker: "runtime", Kind: "error", Summary: "Task paused after restart: " + err.Error()})
+				lifecycle = t.lifecycleSnapshot()
+			}
+		}
 		// clear stale 'running' intents from a prior crash/restart (no live worker
 		// owns them) so they re-claim instead of spinning forever in the UI.
 		if n, _ := t.Store.ResetRunningIntents(); n > 0 {

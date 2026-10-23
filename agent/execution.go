@@ -97,10 +97,11 @@ type taskLocalTool struct {
 
 func (t *taskLocalTool) Call(ctx context.Context, input json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
 	ri := RunInfoFrom(ctx)
-	if strconv.FormatInt(ri.TaskID, 10) != t.client.TaskID {
+	client, err := t.client.ForTask(strconv.FormatInt(ri.TaskID, 10))
+	if err != nil {
 		return actool.Errorf("Task-local tool is unavailable outside the isolated task."), nil
 	}
-	if (t.Name() == "prove_goal" || t.Name() == "goal_met") && t.client.Blocked() {
+	if (t.Name() == "prove_goal" || t.Name() == "goal_met") && client.Blocked() {
 		return actool.Errorf("Runtime failed during this assessment. Repair the runtime and resume after readiness passes before declaring completion."), nil
 	}
 	return t.CoreTool.Call(ctx, input, tc)
@@ -110,7 +111,8 @@ func IsolatedBrowserTools(ctx context.Context) ([]actool.CoreTool, error) {
 	if c == nil {
 		return nil, nil
 	}
-	if strconv.FormatInt(RunInfoFrom(ctx).TaskID, 10) != c.TaskID {
+	c, err := c.ForTask(strconv.FormatInt(RunInfoFrom(ctx).TaskID, 10))
+	if err != nil {
 		return nil, nil
 	}
 	r, e := c.Call(ctx, "__browser_tools", json.RawMessage(`{}`), &actool.ToolContext{WorkingDir: c.Workspace})

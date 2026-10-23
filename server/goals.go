@@ -36,6 +36,12 @@ func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
 	s.engine.decInflight(t.ID)
 	if _, err := s.admitTask(t, "bootstrap"); err != nil {
 		log.Printf("[concurrency] task %s failed to start: %v", t.ID, err)
+		// A newly allocated ID has no operator runner yet. Persist a real pause
+		// so Resume can retry bootstrap after provisioning, including after restart.
+		if _, pauseErr := s.applyTaskControlWithCause(t, "pause", agent.Causef("runtime_not_ready", "task waiting for its runtime", "%s", err)); pauseErr != nil {
+			log.Printf("[runtime] task %s could not be parked: %v", t.ID, pauseErr)
+		}
+		s.engine.emitActivity(t, db.Activity{Worker: "runtime", Kind: "error", Summary: "Task has not started: " + err.Error()})
 	}
 }
 

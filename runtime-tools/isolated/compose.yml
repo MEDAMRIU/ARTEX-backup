@@ -14,7 +14,7 @@ services:
     tmpfs: ['/tmp:size=32m,mode=1777']
     networks:
       runner_net:
-        ipv4_address: 172.30.97.2
+        ipv4_address: ${ARTEX_BROKER_IP:-172.30.97.2}
       outbound: {}
     pids_limit: 128
     mem_limit: 768m
@@ -33,18 +33,20 @@ services:
       # No host /proc or /sys bind is exposed to tool children.
       - systempaths=unconfined
     environment:
-      ARTEX_BROKER_IP: 172.30.97.2
+      ARTEX_BROKER_IP: ${ARTEX_BROKER_IP:-172.30.97.2}
       ARTEX_TOOL_UID: ${ARTEX_TOOL_UID:-10001}
       ARTEX_TOOL_GID: ${ARTEX_TOOL_GID:-10001}
     volumes:
       - ${ARTEX_RUN_DIR}/config:/config:ro
       - ${ARTEX_RUN_DIR}/secrets:/secrets:ro
-      - ${ARTEX_RUN_DIR}/data/tasks/${ARTEX_TASK_ID:-1}:/workspace
+      # Set ARTEX_WORKSPACE_ROOT to the application's data root in deployment.
+      # Only this task subtree is exposed to tools; reports then share app paths.
+      - ${ARTEX_WORKSPACE_ROOT:-${ARTEX_RUN_DIR}/data}/tasks/${ARTEX_TASK_ID:-1}:/workspace
     tmpfs: ['/tmp:size=512m,mode=1777', '/run:size=16m,mode=755']
     ports: ['127.0.0.1:${ARTEX_RUNNER_PORT:-18880}:8080']
     networks:
       runner_net:
-        ipv4_address: 172.30.97.3
+        ipv4_address: ${ARTEX_RUNNER_IP:-172.30.97.3}
       # Docker requires a routed attachment to publish the loopback control port.
       # The runner installs OUTPUT DROP on every interface before dropping root;
       # tool egress remains limited to the broker's exact IP and two ports.
@@ -58,7 +60,7 @@ networks:
   runner_net:
     internal: true
     ipam:
-      config: [{subnet: 172.30.97.0/24}]
+      config: [{subnet: '${ARTEX_RUNNER_SUBNET:-172.30.97.0/24}'}]
   outbound:
     ipam:
-      config: [{subnet: 172.30.98.0/24}]
+      config: [{subnet: '${ARTEX_OUTBOUND_SUBNET:-172.30.98.0/24}'}]

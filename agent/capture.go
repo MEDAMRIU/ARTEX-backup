@@ -43,8 +43,8 @@ func captureRunSession(ctx context.Context, s *agentcore.Session, input string, 
 		if r.IsError && r.Kind == "result" {
 			if c := CurrentExecution(); c != nil {
 				ri := RunInfoFrom(ctx)
-				if strconv.FormatInt(ri.TaskID, 10) == c.TaskID {
-					c.Fail(r.Summary)
+				if taskClient, err := c.ForTask(strconv.FormatInt(ri.TaskID, 10)); err == nil {
+					taskClient.Fail(r.Summary)
 				}
 			}
 		}

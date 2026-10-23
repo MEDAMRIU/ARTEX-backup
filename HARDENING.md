@@ -608,3 +608,38 @@ artifact was found" and included the tool errors. The worker report at
 `~/.local/share/artex-blind-20261023/i10/report.md` is the authoritative output.
 The app and runner workspaces must be shared (or the report path corrected)
 before relying on the UI report as the assessment record.
+
+### Task runner and report repair — 23 October 2026
+
+Approved follow-up replaces the process-wide task-1 binding with an operator-owned
+runner registry. Set `ARTEX_EXECUTION_MODE=isolated` and
+`ARTEX_RUNNER_REGISTRY=/etc/artex/runners`. Each `<task-id>.json` contains only
+`task_id`, `url`, and an absolute `token_file` path. The app discovers a newly
+provisioned task without restart; cached task bindings do not change mid-process.
+Each task retains its own token, policy, deadline, counters and failure barrier.
+Restart restores readiness from that task's runner without clearing a recorded
+failure. Missing or expired runtimes pause with an activity error. A newly created
+task can be resumed after provisioning and still performs initial goal decomposition.
+
+Operator workflow: create the task in the console, prepare an explicit pinned
+policy for that exact task ID, then run `deployment/provision-runtime.py --policy
+<approved-policy.json> --image <reviewed-image> --port <free-loopback-port> --slot
+<unique-network-slot>`. Use `--fixture` only for the private synthetic lab. The
+helper requires root and refuses to reuse an existing task state or registration.
+It mounts `/var/lib/artex/data/tasks/<id>` as that runner's `/workspace`, checks
+readiness, then publishes a group-readable, root-owned registration. The app never
+gets a Docker socket. Provisioning is an explicit operator step; free-form task
+text does not grant a network scope or reset an exhausted assessment. Resume the
+paused task in the UI after its registration appears. The shared task subtree is
+also what the report exporter and evidence download routes read.
+
+DeepSeek V4.1 Flash is now the active app profile (`deepseek-flash`, official API,
+thinking enabled/high). The prior ChatGPT profile is retained. A real connection
+test returned OK, and main/planner/worker resolution selected the new default.
+No credentials belong in this repository, runner registry JSON or runtime image.
+
+The earlier zusott baseline was deliberately constrained by its saved task:
+no signup/login/form submission/bypass, and stop at the authentication wall. Its
+22-request negative therefore does not measure authenticated assessment capability
+or establish a model refusal. The repair validation uses the private owned fixture;
+no new real-target traffic is part of this repair batch.
