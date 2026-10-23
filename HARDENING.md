@@ -574,3 +574,37 @@ stopped, with the workspace and evidence retained. The built-in report export
 remains generic and includes activity errors; the worker report is the primary
 result. This run does not certify the target as secure and does not cover
 authenticated functionality.
+
+### Verification of the blind run (logs, not just the report)
+
+The task-2 activity, `llm_usage`, `server_logs`, runner workspace and broker
+`egress.jsonl` were reviewed after the run. The execution was real: 25
+`gpt-6-sol` calls (295,575 input / 5,239 output / 95,232 cache-read tokens), 10
+Bash calls, one Write and two `record_fact` calls. The broker logged 22 target
+GETs, with 21 × 200 and one 307, and no target write. Captured responses include
+Cloudflare `Cf-Ray` and `Date` headers, and the downloaded bodies and assets
+match the report, so the evidence was not fabricated.
+
+Two non-fatal tool errors are visible in the activity log: the first probe used
+Python `requests`, which is not installed, so the worker switched to `curl`; and
+the planner tried to read `/var/lib/artex/data/tasks/2/report.md` instead of the
+intent workspace file. Neither changed the result, but the planner proved the
+goal from the Write trace rather than an independent re-read of `report.md`.
+
+The run was deliberately shallow: no browser/JavaScript execution, no
+authentication, no POST/form/upload, no parameter mutation and no endpoint
+enumeration beyond 17 linked assets and three referenced config endpoints. The
+report states this. A zero-finding result on the public auth wall is a negative
+observation, not a security pass or a demonstration of vulnerability discovery.
+The only confirmed finding in the current app database is the task-1 synthetic
+IDOR (high, pending verification), with reproducible 200/97-byte evidence and
+403/401 negative controls.
+
+The app-side report export is incomplete in this isolated setup. The app's
+`/var/lib/artex/data/tasks/2/i10` directory was empty because the blind runner
+wrote into its own `/var/lib/artex/runtime/blind-20261023/data/tasks/2/i10`.
+Consequently `/api/report?task=2` reported "No report.md or assessment.md
+artifact was found" and included the tool errors. The worker report at
+`~/.local/share/artex-blind-20261023/i10/report.md` is the authoritative output.
+The app and runner workspaces must be shared (or the report path corrected)
+before relying on the UI report as the assessment record.
