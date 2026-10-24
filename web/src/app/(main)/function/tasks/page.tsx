@@ -126,6 +126,7 @@ import type {
   DeleteTaskOptions,
   DeleteTaskResult,
   LLMProfile,
+  RuntimeProfile,
   Task,
   TaskArchive,
   TaskArchiveState,
@@ -3056,6 +3057,9 @@ function CreateTaskSheet({
   const [companyIDs, setCompanyIDs] = React.useState<number[]>([]);
   const [llmProfileIDs, setLLMProfileIDs] = React.useState<string[]>([]);
   const [creating, setCreating] = React.useState(false);
+  const [creatingStage, setCreatingStage] = React.useState("Creating");
+  const [runtimeProfiles, setRuntimeProfiles] = React.useState<RuntimeProfile[]>([]);
+  const [runtimeProfileID, setRuntimeProfileID] = React.useState("");
   const [timeoutMin, setTimeoutMin] = React.useState(""); // 任务级超时(分钟);空/0 = 不限时
   const [heartbeatMin, setHeartbeatMin] = React.useState("10"); // planner 心跳(分钟);默认10,下限10(与后端一致)
   const [seedFirstIntent, setSeedFirstIntent] = React.useState(false); // 创建时下发种子意图,worker 免等首轮 planner 直接开跑;默认关闭,走标准先规划再执行
@@ -3078,6 +3082,12 @@ function CreateTaskSheet({
       .then(setCompanies)
       .catch(() => setCompanies([]));
   }, []);
+
+  React.useEffect(() => {
+    if (!open) return;
+    api.runtimeProfiles().then((result) => setRuntimeProfiles(result.enabled ? result.profiles : []))
+      .catch(() => setRuntimeProfiles([]));
+  }, [open]);
 
   // pickFiles uploads the chosen files into this draft's staging dir and appends their
   // absolute paths to the description; the task's agents open them by path via Read/Bash.
@@ -3110,11 +3120,23 @@ function CreateTaskSheet({
       toast.error(`Link up to ${MAX_SOURCE_TASKS} source tasks`);
       return;
     }
+    const environment = runtimeProfiles.find((profile) => profile.id === runtimeProfileID);
+    if (runtimeProfileID && !environment) {
+      toast.error("The selected assessment environment is unavailable. Retry setup before creating the task.");
+      return;
+    }
+    const requestedTimeout = Math.max(0, Math.floor(Number(timeoutMin) || 0)) * 60;
+    if (environment && requestedTimeout > environment.assessment_seconds) {
+      toast.error(`This environment allows up to ${Math.floor(environment.assessment_seconds / 60)} minutes`);
+      return;
+    }
+    let createdID = "";
     setCreating(true);
+    setCreatingStage("Creating");
     try {
-      const timeoutSec = Math.max(0, Math.floor(Number(timeoutMin) || 0)) * 60;
+      const timeoutSec = requestedTimeout || environment?.assessment_seconds || 0;
       const heartbeatSec = Math.max(10, Math.floor(Number(heartbeatMin) || 10)) * 60; // 下限 10min，与后端归一一致
-      await api.createTask({
+      const created = await api.createTask({
         name: name.trim(),
         categoryId: categoryID,
         description: description.trim(),
@@ -3127,32 +3149,44 @@ function CreateTaskSheet({
         planHeartbeatSeconds: heartbeatSec,
         coverageEnabled,
       });
-      toast.success("Task created");
-      setName("");
-      setCategoryID(undefined);
-      setDescription("");
-      setGoal("");
-      setSelectedTemplateID(null);
-      setSourceTaskIDs([]);
-      setCompanyIDs([]);
-      setLLMProfileIDs([]);
-      setTimeoutMin("");
-      setHeartbeatMin("10");
-      setSeedFirstIntent(false);
-      setCoverageEnabled(true);
-      setUploadCount(0);
-      draftIdRef.current = "";
-      setOpen(false);
-      onCreated();
+      createdID = created.id;
+      if (environment) {
+        setCreatingStage("Preparing environment");
+        await api.provisionTaskRuntime(created.id, environment.id);
+        setCreatingStage("Starting");
+        await api.controlTask(created.id, "resume");
+      }
+      toast.success(environment ? "Task created and admitted to run" : "Task created");
     } catch (e) {
-      toast.error("Failed to create:" + (e as Error).message);
+      toast.error(createdID
+        ? `Task #${createdID} was created and remains available. Startup did not finish: ${(e as Error).message}`
+        : "Failed to create:" + (e as Error).message);
     } finally {
       setCreating(false);
+      if (createdID) {
+        setRuntimeProfileID("");
+        setName("");
+        setCategoryID(undefined);
+        setDescription("");
+        setGoal("");
+        setSelectedTemplateID(null);
+        setSourceTaskIDs([]);
+        setCompanyIDs([]);
+        setLLMProfileIDs([]);
+        setTimeoutMin("");
+        setHeartbeatMin("10");
+        setSeedFirstIntent(false);
+        setCoverageEnabled(true);
+        setUploadCount(0);
+        draftIdRef.current = "";
+        setOpen(false);
+        onCreated();
+      }
     }
   }
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={open} onOpenChange={(value) => { if (!creating) setOpen(value); }}>
       <SheetTrigger asChild>
         <Button size="sm">
           <PlusIcon /> {"Create task"}
@@ -3204,6 +3238,21 @@ function CreateTaskSheet({
               />
               <FieldDescription>{"Optional; one category only. Used for task filtering and archiving; does not affect Agent execution."}</FieldDescription>
             </Field>
+            {runtimeProfiles.length > 0 && (
+              <Field>
+                <FieldLabel htmlFor="runtime-profile">Assessment environment</FieldLabel>
+                <select id="runtime-profile" value={runtimeProfileID} disabled={creating}
+                  className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+                  onChange={(event) => setRuntimeProfileID(event.target.value)}>
+                  <option value="">Use an existing runner or wait for setup</option>
+                  {runtimeProfiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+                </select>
+                <FieldDescription>
+                  {runtimeProfiles.find((profile) => profile.id === runtimeProfileID)?.description
+                    || "Choose an approved environment to prepare and start this task automatically."}
+                </FieldDescription>
+              </Field>
+            )}
             <div className="grid gap-2">
               <Label htmlFor="description">{"Description"}</Label>
               <Textarea
@@ -3357,11 +3406,11 @@ function CreateTaskSheet({
 
         <SheetFooter className="flex-row justify-end gap-2 border-t p-4">
           <SheetClose asChild>
-            <Button variant="outline">{"Cancel"}</Button>
+            <Button variant="outline" disabled={creating}>{"Cancel"}</Button>
           </SheetClose>
           <Button onClick={createTask} disabled={creating || uploading}>
             {creating && <Spinner data-icon="inline-start" />}
-            {creating ? "Creating" : "Create"}
+            {creating ? creatingStage : runtimeProfileID ? "Create and start" : "Create"}
           </Button>
         </SheetFooter>
       </SheetContent>

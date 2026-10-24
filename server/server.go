@@ -692,6 +692,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/runtime/readiness", s.runtimeReadiness)
 	mux.HandleFunc("POST /api/runtime/readiness", s.runtimeReadiness)
+	mux.HandleFunc("GET /api/runtime/profiles", s.runtimeProfiles)
+	mux.HandleFunc("POST /api/tasks/{id}/runtime/provision", s.provisionTaskRuntime)
 	mux.HandleFunc("GET /api/stats", s.stats)
 	mux.HandleFunc("GET /api/logs", s.getLogs)
 	mux.HandleFunc("GET /api/logs/history", s.getLogsHistory)

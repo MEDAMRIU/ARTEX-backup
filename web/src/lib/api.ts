@@ -64,6 +64,7 @@ import type {
   ModelTokenStat,
   PromptVar,
   PromptVersion,
+  RuntimeProfile,
   SessionTokenUsage,
   Settings,
   Severity,
@@ -216,6 +217,9 @@ export const api = {
   tasks: () =>
     get<{ tasks: Task[]; active: string }>("/tasks").then((r) => ({ tasks: arr(r.tasks), active: r.active ?? "" })),
   task: (id: string) => get<Task>(`/tasks/${encodeURIComponent(id)}`),
+  runtimeProfiles: () => get<{ enabled: boolean; profiles: RuntimeProfile[] }>("/runtime/profiles"),
+  provisionTaskRuntime: (id: string, profileId: string) =>
+    post<{ task_id: string; profile_id: string; ready: boolean }>(`/tasks/${encodeURIComponent(id)}/runtime/provision`, { profile_id: profileId }),
   createTask: (input: {
     name?: string;
     categoryId?: number;

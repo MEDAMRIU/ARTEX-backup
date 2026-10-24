@@ -25,6 +25,8 @@ def main():
     parser.add_argument('--port', type=int, required=True)
     parser.add_argument('--slot', type=int, required=True, help='Unique network slot 1..250')
     parser.add_argument('--workspace-root', type=Path, default=Path('/var/lib/artex/data'))
+    parser.add_argument('--host-workspace', type=Path,
+                        help='Own-task app path alias when the source workspace has a protected bind anchor')
     parser.add_argument('--runtime-root', type=Path, default=Path('/var/lib/artex/runtime'))
     parser.add_argument('--registry', type=Path, default=Path('/etc/artex/runners'))
     parser.add_argument('--fixture', action='store_true', help='Add the private synthetic fixture')
@@ -60,10 +62,23 @@ def main():
     if args.finish_existing and not state.is_dir():
         parser.error('No existing provisioning state to finish')
     workspace = args.workspace_root / 'tasks' / task
-    workspace.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if workspace.resolve() != workspace.absolute():
-        parser.error('Task workspace must not contain symlink components')
-    os.chown(workspace, uid, gid)
+    host_workspace = args.host_workspace or workspace
+    if (not host_workspace.is_absolute() or str(host_workspace) != str(host_workspace.absolute())
+            or host_workspace.parts[-2:] != ('tasks', task)):
+        parser.error('Host workspace alias must be the absolute own-task app path')
+    workspace_fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for component in workspace.absolute().parts[1:]:
+            try:
+                child_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=workspace_fd)
+            except FileNotFoundError:
+                os.mkdir(component, mode=0o700, dir_fd=workspace_fd)
+                child_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=workspace_fd)
+            os.close(workspace_fd)
+            workspace_fd = child_fd
+        os.fchown(workspace_fd, uid, gid)
+    finally:
+        os.close(workspace_fd)
     if not args.finish_existing:
         state.mkdir(parents=True, mode=0o700)
         os.chmod(state, 0o700)
@@ -90,7 +105,7 @@ def main():
     save(state / 'config/broker.json', {'state': '/state', 'policy_file': '/config/policy.json',
          'proxy_listen': ':3128', 'api_listen': ':8081', 'canary_listen': ':3130'}, 0o644)
     save(state / 'config/runner.json', {'listen': ':8080', 'task_id': task, 'workspace': '/workspace',
-         'host_workspace': str(workspace),
+         'host_workspace': str(host_workspace),
          'token_file': '/secrets/runner-token', 'proxy_url': f'http://{broker}:3128',
          'broker_api': f'http://{broker}:8081', 'ca_file': '/run/artex-public/ca.pem',
          'denied_probe_address': f'{broker}:3130', 'expires_at': policy['expires_at']}, 0o644)

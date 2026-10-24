@@ -716,3 +716,55 @@ runner provisioning before Resume; exhausted policies are never auto-renewed.
 The Zusott auth-wall exclusions were in the operator-written task instructions,
 not evidence that the model refused an authenticated test. CRM: no stored website
 value changed. Site Manager: no managed website or redirect changed.
+
+
+### Authenticated Zusott run and provisioning follow-up — 2026-10-24 12:23:01 UTC
+
+Owner approved a fresh legitimate-account assessment and then provisioning automation.
+Task4 used DeepSeek profile2 with a pinned 80-request, HTTPS-only policy for
+zusott.com plus api.mail.tm (mailboxes only), 1500ms pacing, no raw TCP or spend.
+It registered/verified two probe accounts and tested their own profile/session
+controls. Independent offline review confirms 75 actual HTTP (66target+9mail),
+zero TCP. Model's 73 count missed two automatically followed dashboard307 redirects;
+unauthenticated dashboard is307/33B followed by sign-in200/11775B, not a soft200gate.
+Two pending low finding records describe one signed-cookie cache revocation lag:
+saved pre-logout cookies replayed after logout returned own-account data and accepted
+an identical-value profile PUT. Normal post-logout jars were empty. No takeover,
+foreign-account access, persisted changed write or exact TTL cutoff was established.
+
+The original final-report.md (33436B), complete workspace archive, broker/SQLite,
+API/task/goals/findings/model/activity snapshots are retained privately under
+~/.local/share/artex-auth-20261024. Independently checked corrections are in
+assessment.md there and uploaded to app tasks/4/assessment.md; original report is
+unchanged. Some archived response bodies were0644 under protected parents, contrary
+to the report's blanket0600 claim; retained live task4files were subsequently
+hardened0600/directories0700. Task4 runner+broker stopped after completion; evidence
+and accounts retained, no further target requests.
+
+Actual task outcome was timeout after20minutes, 0/4goals and no in-flight work.
+There were33prove_goal calls rejected by a persisted runtime-failure barrier.
+A normal optional shell diagnostic returning127 had been classified as an executor
+failure. The repair leaves command126/127 as ordinary observations, retaining
+actual shell-launch/transport failures and mandatory readiness checks. Historical
+task4status/goals are not rewritten to imply successful automatic completion.
+
+New code adds root-owned, socket-activated provisioning for explicitly configured
+scope profiles. The app passes only task ID/profile ID over a Unix socket; it never
+gets Docker access. Root state/configuration live outside app-owned paths under
+/var/lib/artex-operator. Each original task policy, pinned DNS and deadline survive
+retries; altered/reused/manual/expired task state is refused. App task directories
+are opened component-by-component with O_NOFOLLOW and pinned by directory FD to
+root-controlled bind anchors for Docker. Synthetic fixture TLS exception is never
+applied to external hosts. Periodic30second expiry cleanup stops only owned stacks,
+retaining files/networks. UI selects an approved environment, then creates,
+provisions and resumes the task; a failed setup leaves the created task visible.
+Other targets require an operator-approved profile, never free-form task text.
+
+Independent source review caught and corrected root-path replacement, fixture TLS
+and cleanup gaps before deployment. Python12tests, targetedGoUnix/API/classification
+tests and TypeScript checks passed; full server/execution/agent race and final static
+build are being completed. A test exposed a concurrent Engine resolver update race;
+resolver publication/snapshot now use a mutex. Native/image build, actual Linux
+FD-bind/systemd/Docker acceptance, UI creation/goal proof and final deployment remain
+pending at this checkpoint. Source changes are local/uncommitted/unpushed; live
+release is still20261023-runtime-reports-alias. No shared-server change.

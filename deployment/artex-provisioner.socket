@@ -1,0 +1,12 @@
+[Unit]
+Description=ARTEX approved runner provisioning socket
+
+[Socket]
+ListenStream=/run/artex-provisioner.sock
+SocketUser=root
+SocketGroup=artex
+SocketMode=0660
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

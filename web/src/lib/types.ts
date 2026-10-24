@@ -4,6 +4,17 @@
 export type TaskStatus = "created" | "queued" | "running" | "paused" | "done" | "failed" | "timeout";
 export type EngineMode = "exploring" | "paused" | "stalled" | "idle";
 
+export interface RuntimeProfile {
+  id: string;
+  name: string;
+  description: string;
+  targets: { host: string; http_ports: number[]; tcp_ports: number[] }[];
+  http_requests: number;
+  min_interval_ms: number;
+  duration_seconds: number;
+  assessment_seconds: number;
+}
+
 export interface Task {
   id: string;
   name?: string; // 可选任务名称;空/缺省=未命名,展示时回退到描述

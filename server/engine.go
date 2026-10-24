@@ -147,6 +147,7 @@ type Engine struct {
 	// resolve returns a task's dedicated planner/worker (wired by the server as the
 	// authoritative task-router). nil,nil means this task is deliberately unavailable
 	// (for example an exhausted failover chain) — there is no global-pair fallback.
+	resolveMu            sync.RWMutex
 	resolve              func(t *Task) (*agent.Planner, *agent.Worker)
 	resolveAuthoritative bool
 	// readiness reports whether a global LLM provider is configured — the signal behind
@@ -704,6 +705,8 @@ func (e *Engine) SetReadiness(fn func() bool) { e.readiness = fn }
 // SetAgentResolver installs a per-task planner/worker resolver (wired by the server).
 // Called once at startup before any task loop runs, so no lock is needed on reads.
 func (e *Engine) SetAgentResolver(fn func(t *Task) (*agent.Planner, *agent.Worker)) {
+	e.resolveMu.Lock()
+	defer e.resolveMu.Unlock()
 	e.resolve = fn
 	e.resolveAuthoritative = false
 }
@@ -712,6 +715,8 @@ func (e *Engine) SetAgentResolver(fn func(t *Task) (*agent.Planner, *agent.Worke
 // fall through to the global provider. Task-level failover chains use this so a
 // fully exhausted chain cannot silently bypass its configured boundary.
 func (e *Engine) SetAuthoritativeAgentResolver(fn func(t *Task) (*agent.Planner, *agent.Worker)) {
+	e.resolveMu.Lock()
+	defer e.resolveMu.Unlock()
 	e.resolve = fn
 	e.resolveAuthoritative = true
 }
@@ -720,9 +725,12 @@ func (e *Engine) SetAuthoritativeAgentResolver(fn func(t *Task) (*agent.Planner,
 // resolver. nil,nil means the task is deliberately unavailable (e.g. an exhausted
 // failover chain); there is no global-pair fallback.
 func (e *Engine) snapshotFor(t *Task) (*agent.Planner, *agent.Worker) {
-	if e.resolve != nil {
-		p, w := e.resolve(t)
-		if (p != nil && w != nil) || e.resolveAuthoritative {
+	e.resolveMu.RLock()
+	resolve, authoritative := e.resolve, e.resolveAuthoritative
+	e.resolveMu.RUnlock()
+	if resolve != nil {
+		p, w := resolve(t)
+		if (p != nil && w != nil) || authoritative {
 			return p, w
 		}
 	}

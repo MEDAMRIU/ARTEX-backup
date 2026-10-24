@@ -81,7 +81,7 @@ reply = call('mcp__browser__browser_snapshot', {}, directory='acceptance-browser
 record('browser_transport_failure_is_infrastructure_error', 'MCP transport/protocol failed' in reply.get('error', ''), reply)
 
 reply = call('Bash', {'command': 'artex-required-command-that-does-not-exist'}, directory='acceptance-missing')
-record('missing_dependency_is_infrastructure_error', 'Required shell command could not run' in reply.get('error', ''), reply)
+record('missing_optional_command_is_observation', not reply.get('error') and reply.get('result', {}).get('IsError'), reply)
 
 ready = request('/v1/readiness', {})
 record('readiness_after_failure_repair', ready.get('ready'), ready)

@@ -1,0 +1,19 @@
+[Unit]
+Description=ARTEX approved runner provisioner
+Requires=artex-provisioner.socket docker.service
+After=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/artex/current
+ExecStart=/usr/bin/python3 /opt/artex/current/deployment/runtime-provisioner.py --config /etc/artex/provisioner.json
+Environment=DOCKER_CONFIG=/var/lib/artex-operator/docker-client
+UMask=0077
+NoNewPrivileges=true
+# Bind anchors must be visible to Docker in the host mount namespace.
+# This root operator is restricted by its socket and root-owned scope/code;
+# the separate application service retains its filesystem/capability sandbox.
+RestrictRealtime=true
+LockPersonality=true

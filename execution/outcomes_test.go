@@ -29,3 +29,14 @@ func TestExpectedCommandFailureDoesNotPoisonRuntime(t *testing.T) {
 		}
 	}
 }
+
+func TestShellCommandStatusIsNotAnExecutorLaunchFailure(t *testing.T) {
+	for _, text := range []string{"which: command not found\n[exit code 127]", "permission denied\n[exit code 126]", "negative probe\n[exit code 1]"} {
+		if shellLaunchFailure(text) {
+			t.Fatalf("ordinary command result would block goal completion: %s", text)
+		}
+	}
+	if !shellLaunchFailure("[failed to run: cannot start /bin/bash]") {
+		t.Fatal("actual shell launch failure must retain infrastructure protection")
+	}
+}

@@ -33,6 +33,10 @@ func TestNewTaskRunnerAdmissionAndSharedReportExport(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	s := New(ctx, m, t.TempDir(), workspace, t.TempDir())
+	// This test drives the runner directly, not an LLM. Prevent background
+	// nil-provider workers from racing the cold-readiness assertion and latching
+	// an unrelated model_error in shared test settings.
+	s.engine.SetAuthoritativeAgentResolver(func(*Task) (*agent.Planner, *agent.Worker) { return nil, nil })
 	token, err := signJWT(s.jwtKey)
 	if err != nil {
 		t.Fatal(err)

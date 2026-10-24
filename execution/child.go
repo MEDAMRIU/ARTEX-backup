@@ -193,7 +193,11 @@ func ChildMain(in io.Reader, out io.Writer) error {
 				}
 			} else if result.IsError && request.Name == "Bash" {
 				text := strings.TrimSpace(result.Flatten())
-				if strings.HasSuffix(text, "[exit code 126]") || strings.HasSuffix(text, "[exit code 127]") || strings.Contains(text, "[failed to run:") {
+				// A shell which ran and returned 126/127 is an ordinary command
+				// observation (e.g. an optional `which` diagnostic). Readiness
+				// checks the required dependencies; only launch failure latches
+				// the infrastructure barrier here.
+				if shellLaunchFailure(text) {
 					reply.Error = "Required shell command could not run: " + text[:min(len(text), 2000)]
 				}
 			}
@@ -204,4 +208,8 @@ func ChildMain(in io.Reader, out io.Writer) error {
 		}
 	}
 	return scanner.Err()
+}
+
+func shellLaunchFailure(text string) bool {
+	return strings.Contains(text, "[failed to run:")
 }
